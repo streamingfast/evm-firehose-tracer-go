@@ -156,16 +156,17 @@ type CallFrame struct {
 }
 
 // CallType represents the type of call
-type CallType int
+// These values match the EVM opcodes for the respective call types
+type CallType byte
 
 const (
-	CallTypeCall CallType = iota
-	CallTypeCallCode
-	CallTypeDelegateCall
-	CallTypeStaticCall
-	CallTypeCreate
-	CallTypeCreate2
-	CallTypeSelfDestruct
+	CallTypeCreate       CallType = 0xf0 // CREATE opcode
+	CallTypeCall         CallType = 0xf1 // CALL opcode
+	CallTypeCallCode     CallType = 0xf2 // CALLCODE opcode
+	CallTypeDelegateCall CallType = 0xf4 // DELEGATECALL opcode
+	CallTypeCreate2      CallType = 0xf5 // CREATE2 opcode
+	CallTypeStaticCall   CallType = 0xfa // STATICCALL opcode
+	CallTypeSelfDestruct CallType = 0xff // SELFDESTRUCT opcode (placeholder, handled specially)
 )
 
 // Address represents an Ethereum address (20 bytes)

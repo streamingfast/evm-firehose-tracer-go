@@ -2,14 +2,17 @@ package firehose
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
 	"math/big"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +24,15 @@ import (
 )
 
 const ProtocolVersion = "3.0"
+
+// VM error messages that indicate reverted state
+// These match the error strings from go-ethereum/core/vm/errors.go
+// We use string matching instead of errors.Is to avoid importing the vm package
+const (
+	errExecutionReverted           = "execution reverted"
+	errInsufficientBalanceTransfer = "insufficient balance for transfer"
+	errMaxCallDepth                = "max call depth exceeded"
+)
 
 // Tracer is the main Firehose tracer that captures EVM execution and produces
 // protobuf blocks for indexing. It can operate in two modes:
@@ -296,6 +308,27 @@ func bigIntToProtobuf(i *big.Int) *pbeth.BigInt {
 		return nil
 	}
 	return &pbeth.BigInt{Bytes: i.Bytes()}
+}
+
+// errorIsString checks if an error matches a target error message by walking the error chain
+// This is NOT a replacement for errors.Is - it uses string matching to avoid importing vm package
+// Geth errors when unwrapped will always lead to pure string comparison
+func errorIsString(err error, target string) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check current error message with exact string equality
+	if err.Error() == target {
+		return true
+	}
+
+	// Unwrap and check wrapped errors recursively
+	if unwrapped := errors.Unwrap(err); unwrapped != nil {
+		return errorIsString(unwrapped, target)
+	}
+
+	return false
 }
 
 // ============================================================================
@@ -666,6 +699,11 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 		return t.transaction
 	}
 
+	// Sorting needs to happen first, before we populate the state reverted
+	slices.SortFunc(t.transaction.Calls, func(i, j *pbeth.Call) int {
+		return cmp.Compare(i.Index, j.Index)
+	})
+
 	// Get root call
 	rootCall := t.transaction.Calls[0]
 
@@ -750,17 +788,17 @@ func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionRece
 
 // populateStateReverted walks the call tree and marks reverted state
 func (t *Tracer) populateStateReverted() {
-	for _, call := range t.transaction.Calls {
-		if call.StatusReverted {
-			t.markStateReverted(call)
+	// Match native tracer logic: StateReverted is set if parent is reverted OR call failed
+	// Calls are ordered by index, so we see parents before children
+	calls := t.transaction.Calls
+	for _, call := range calls {
+		var parent *pbeth.Call
+		if call.ParentIndex > 0 {
+			parent = calls[call.ParentIndex-1]
 		}
-	}
-}
 
-func (t *Tracer) markStateReverted(call *pbeth.Call) {
-	call.StateReverted = true
-	// Note: Individual state change objects don't have StateReverted field
-	// The StateReverted flag on the call is sufficient to indicate all its changes are reverted
+		call.StateReverted = (parent != nil && parent.StateReverted) || call.StatusFailed
+	}
 }
 
 // ============================================================================
@@ -782,7 +820,7 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 		CallType:     t.callTypeToProto(CallType(typ)),
 		Caller:       from[:],
 		Address:      to[:],
-		Value:        &pbeth.BigInt{Bytes: value.Bytes()},
+		Value:        bigIntToProtobuf(value), // Use bigIntToProtobuf to handle nil values
 		GasLimit:     gas,
 		GasConsumed:  0,
 		Input:        input,
@@ -800,38 +838,61 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 		t.deferredCallState.MaybePopulateCallAndReset("enter", call)
 	}
 
-	t.transaction.Calls = append(t.transaction.Calls, call)
+	// Don't append to transaction here - will be appended in OnCallExit
 	t.callStack.Push(call)
 }
 
 // OnCallExit is called when exiting a call
 func (t *Tracer) OnCallExit(output []byte, gasUsed uint64, err error) {
-	call := t.callStack.Peek()
-	if call == nil {
-		firehoseDebug("call exit with no active call - ignoring")
-		return
-	}
-
+	// Match native tracer: compute depth before any operations
 	depth := t.callStack.Depth() - 1 // -1 because we haven't popped yet
 	reverted := err != nil
+
+	// Delegate to native validator before any processing
 	if t.nativeValidator != nil {
 		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
 	}
 
+	// Ensure we're in a valid state (matching native tracer line 1431)
+	t.ensureInBlockAndInTrxAndInCall()
+
+	// Pop call from stack (matching native tracer line 1433)
+	call := t.callStack.Pop()
+
 	firehoseTrace("call exit (depth=%d gas_used=%d err=%s output=%s)",
 		call.Depth, gasUsed, errorView(err), outputView(output))
 
+	// Set gas consumed (matching native tracer line 1434)
 	call.GasConsumed = gasUsed
-	call.ReturnData = output
-	call.EndOrdinal = t.blockOrdinal.Next()
 
-	if err != nil {
-		call.StatusFailed = true
-		call.StatusReverted = true
-		call.FailureReason = err.Error()
+	// For CREATE calls, don't set return data (matching native tracer line 1437)
+	if call.CallType != pbeth.CallType_CREATE {
+		call.ReturnData = bytes.Clone(output)
 	}
 
-	t.callStack.Pop()
+	// Handle errors (matching native tracer line 1441)
+	if reverted {
+		failureReason := ""
+		if err != nil {
+			failureReason = err.Error()
+		}
+
+		call.FailureReason = failureReason
+		call.StatusFailed = true
+
+		// Match native tracer logic from firehose.go line 1452:
+		// We also treat ErrInsufficientBalance and ErrDepth as reverted in Firehose model
+		// because they do not cost any gas.
+		call.StatusReverted = errorIsString(err, errExecutionReverted) ||
+			errorIsString(err, errInsufficientBalanceTransfer) ||
+			errorIsString(err, errMaxCallDepth)
+	}
+
+	// Set EndOrdinal (matching native tracer line 1469)
+	call.EndOrdinal = t.blockOrdinal.Next()
+
+	// Append to transaction calls (matching native tracer line 1472)
+	t.transaction.Calls = append(t.transaction.Calls, call)
 }
 
 func (t *Tracer) callTypeToProto(ct CallType) pbeth.CallType {

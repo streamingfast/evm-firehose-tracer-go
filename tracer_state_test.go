@@ -26,7 +26,7 @@ func TestTracer_State(t *testing.T) {
 		assert.Equal(t, 2, len(nativeLog.Topics))
 		assert.Equal(t, topics[0][:], nativeLog.Topics[0][:])
 		assert.Equal(t, topics[1][:], nativeLog.Topics[1][:])
-		assert.Equal(t, data, nativeLog.Data)
+		assertEqualBytes(t, data, nativeLog.Data)
 		assert.Equal(t, uint(blockIndex), nativeLog.Index)
 	})
 }

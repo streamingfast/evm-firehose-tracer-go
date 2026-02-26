@@ -4,15 +4,42 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"math/big"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/core/vm"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
+
+// Test error constants matching VM errors from go-ethereum
+// We use the actual VM errors so that both the native validator (which uses errors.Is)
+// and the shared tracer (which uses errorIsString) can recognize them correctly
+var (
+	testErrExecutionReverted           = vm.ErrExecutionReverted
+	testErrInsufficientBalanceTransfer = vm.ErrInsufficientBalance
+	testErrMaxCallDepth                = vm.ErrDepth
+	testErrOutOfGas                    = vm.ErrOutOfGas
+)
+
+// wrapError wraps an error with a custom reason message
+// The wrapped error is checked by errorIs in tracer.go
+type wrapError struct {
+	reason  string
+	wrapped error
+}
+
+func (e *wrapError) Error() string {
+	return e.reason
+}
+
+func (e *wrapError) Unwrap() error {
+	return e.wrapped
+}
 
 // TestBlock provides a standard test block with reasonable defaults
 // This block represents block #100 with typical Ethereum mainnet settings
@@ -260,8 +287,40 @@ func (s *TracerTester) StartCallCode(depth int, from, to [20]byte, value *big.In
 	return s.StartCallRaw(depth, byte(CallTypeCallCode), from, to, input, gas, value)
 }
 
-// EndCall ends a call context
+// EndCall ends a call context successfully
 func (s *TracerTester) EndCall(output []byte, gasUsed uint64, err error) *TracerTester {
+	s.Tracer.OnCallExit(output, gasUsed, err)
+	return s
+}
+
+// EndCallReverted ends a call context with a revert error
+// Wraps testErrExecutionReverted so tracer recognizes it as reverted
+func (s *TracerTester) EndCallReverted(output []byte, gasUsed uint64, reason string) *TracerTester {
+	err := &wrapError{
+		reason:  reason,
+		wrapped: testErrExecutionReverted,
+	}
+	s.Tracer.OnCallExit(output, gasUsed, err)
+	return s
+}
+
+// EndCallFailed ends a call context with a non-revert failure
+// Uses errors that are recognized as failures but not reverts
+func (s *TracerTester) EndCallFailed(output []byte, gasUsed uint64, reason string) *TracerTester {
+	// Map common failure reasons to their appropriate errors
+	var wrapped error
+	switch reason {
+	case "out of gas":
+		wrapped = testErrOutOfGas
+	default:
+		// Generic error - not recognized as revert
+		wrapped = errors.New(reason)
+	}
+
+	err := &wrapError{
+		reason:  reason,
+		wrapped: wrapped,
+	}
 	s.Tracer.OnCallExit(output, gasUsed, err)
 	return s
 }
