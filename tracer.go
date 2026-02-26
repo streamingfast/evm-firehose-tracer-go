@@ -3,9 +3,7 @@ package firehose
 import (
 	"bytes"
 	"cmp"
-	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -19,7 +17,6 @@ import (
 
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"golang.org/x/crypto/sha3"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -206,140 +203,6 @@ func (t *Tracer) resetTransaction() {
 	t.latestCallEnterSuicided = false
 	t.deferredCallState.Reset()
 }
-
-// ============================================================================
-// Output Functions
-// ============================================================================
-
-// printToFirehose writes a message to the Firehose output stream
-func (t *Tracer) printToFirehose(args ...interface{}) {
-	line := fmt.Sprintln(args...)
-	if t.testingBuffer != nil {
-		t.testingBuffer.WriteString(line)
-	} else {
-		t.outputWriter.Write([]byte(line))
-	}
-}
-
-// flushToFirehose writes bytes directly to the output stream
-func (t *Tracer) flushToFirehose(bytes []byte) error {
-	if t.testingBuffer != nil {
-		t.testingBuffer.Write(bytes)
-		return nil
-	}
-
-	_, err := t.outputWriter.Write(bytes)
-	return err
-}
-
-// printBlockToFirehose serializes and writes a block to the output stream
-func (t *Tracer) printBlockToFirehose(block *pbeth.Block) ([]byte, error) {
-	marshalled, err := proto.Marshal(block)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal block: %w", err)
-	}
-
-	// Encode as base64 for Firehose protocol
-	encoded := base64.StdEncoding.EncodeToString(marshalled)
-
-	// Format: "FIRE BLOCK <block_num> <block_hash> <parent_num> <parent_hash> <lib_num> <timestamp> <payload>"
-	blockHash := hex.EncodeToString(block.Hash)
-	parentHash := hex.EncodeToString(block.Header.ParentHash)
-	line := fmt.Sprintf("FIRE BLOCK %d %s %d %s 0 %d %s\n",
-		block.Number,
-		blockHash,
-		block.Number-1, // parent number
-		parentHash,
-		block.Header.Timestamp.AsTime().UnixNano(),
-		encoded)
-	return []byte(line), nil
-}
-
-// Helper to create a pointer to a value
-func ptr[T any](v T) *T {
-	return &v
-}
-
-// computeEffectiveGasPrice computes the effective gas price for a transaction
-// following the same logic as go-ethereum's gasPrice function:
-// - For legacy/access list transactions: use GasPrice
-// - For EIP-1559 transactions (dynamic fee, blob, set code):
-//   - If baseFee is nil: use MaxFeePerGas (GasFeeCap)
-//   - If baseFee is set: use min(MaxPriorityFeePerGas + baseFee, MaxFeePerGas)
-func computeEffectiveGasPrice(event TxEvent, baseFee *big.Int) *big.Int {
-	switch event.Type {
-	case 0, 1: // Legacy, AccessList
-		return event.GasPrice
-
-	case 2, 3, 4: // DynamicFee, Blob, SetCode
-		// For EIP-1559 transactions, if baseFee is nil, use MaxFeePerGas
-		if baseFee == nil {
-			if event.MaxFeePerGas != nil {
-				return event.MaxFeePerGas
-			}
-			// Fallback to GasPrice if MaxFeePerGas is not set
-			return event.GasPrice
-		}
-
-		// Compute: min(MaxPriorityFeePerGas + baseFee, MaxFeePerGas)
-		if event.MaxPriorityFeePerGas != nil && event.MaxFeePerGas != nil {
-			effectivePrice := new(big.Int).Add(event.MaxPriorityFeePerGas, baseFee)
-			if effectivePrice.Cmp(event.MaxFeePerGas) > 0 {
-				return event.MaxFeePerGas
-			}
-			return effectivePrice
-		}
-
-		// Fallback to GasPrice if EIP-1559 fields are not set
-		return event.GasPrice
-
-	default:
-		// Unknown type, use GasPrice
-		return event.GasPrice
-	}
-}
-
-// bigIntToProtobuf converts a big.Int to protobuf BigInt
-// Matches the semantics of firehoseBigIntFromNative in go-ethereum:
-// - Returns nil for both nil and zero values
-// - Only non-zero values get encoded
-func bigIntToProtobuf(i *big.Int) *pbeth.BigInt {
-	if i == nil || i.Sign() == 0 {
-		return nil
-	}
-	return &pbeth.BigInt{Bytes: i.Bytes()}
-}
-
-// errorIsString checks if an error matches a target error message by walking the error chain
-// This is NOT a replacement for errors.Is - it uses string matching to avoid importing vm package
-// Geth errors when unwrapped will always lead to pure string comparison
-func errorIsString(err error, target string) bool {
-	if err == nil {
-		return false
-	}
-
-	// Check current error message with exact string equality
-	if err.Error() == target {
-		return true
-	}
-
-	// Unwrap and check wrapped errors recursively
-	if unwrapped := errors.Unwrap(err); unwrapped != nil {
-		return errorIsString(unwrapped, target)
-	}
-
-	return false
-}
-
-// ============================================================================
-// Hook Parameter Types
-// ============================================================================
-// These types define the minimal data needed for each hook method.
-// Chain-specific implementations will convert from go-ethereum types to these.
-
-// ============================================================================
-// Lifecycle Hooks
-// ============================================================================
 
 // OnBlockchainInit is called once when the blockchain is initialized
 func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConfig *ChainConfig) {
@@ -650,21 +513,69 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 	}
 
 	// Set EIP-7702 set code authorization list (type 4)
+	// If we have a native validator, use the validated authorizations from it
+	// (with Authority field populated from signature recovery)
 	if len(event.SetCodeAuthorizations) > 0 {
-		trx.SetCodeAuthorizations = make([]*pbeth.SetCodeAuthorization, len(event.SetCodeAuthorizations))
-		for i, auth := range event.SetCodeAuthorizations {
-			trx.SetCodeAuthorizations[i] = &pbeth.SetCodeAuthorization{
-				ChainId: auth.ChainID[:],
-				Address: auth.Address[:],
-				Nonce:   auth.Nonce,
-				V:       auth.V,
-				R:       auth.R[:],
-				S:       auth.S[:],
+		if t.nativeValidator != nil && t.nativeValidator.tracer != nil {
+			// Use the validated authorizations from native tracer
+			// The native tracer has already validated signatures and populated Authority fields
+			trx.SetCodeAuthorizations = t.nativeValidator.tracer.TransactionForTesting().SetCodeAuthorizations
+		} else {
+			// No native validator - copy raw authorizations without validation
+			trx.SetCodeAuthorizations = make([]*pbeth.SetCodeAuthorization, len(event.SetCodeAuthorizations))
+			for i, auth := range event.SetCodeAuthorizations {
+				trx.SetCodeAuthorizations[i] = &pbeth.SetCodeAuthorization{
+					ChainId: auth.ChainID[:],
+					Address: auth.Address[:],
+					Nonce:   auth.Nonce,
+					V:       auth.V,
+					R:       auth.R[:],
+					S:       auth.S[:],
+				}
 			}
 		}
 	}
 
 	t.transaction = trx
+}
+
+// computeEffectiveGasPrice computes the effective gas price for a transaction
+// following the same logic as go-ethereum's gasPrice function:
+// - For legacy/access list transactions: use GasPrice
+// - For EIP-1559 transactions (dynamic fee, blob, set code):
+//   - If baseFee is nil: use MaxFeePerGas (GasFeeCap)
+//   - If baseFee is set: use min(MaxPriorityFeePerGas + baseFee, MaxFeePerGas)
+func computeEffectiveGasPrice(event TxEvent, baseFee *big.Int) *big.Int {
+	switch event.Type {
+	case 0, 1: // Legacy, AccessList
+		return event.GasPrice
+
+	case 2, 3, 4: // DynamicFee, Blob, SetCode
+		// For EIP-1559 transactions, if baseFee is nil, use MaxFeePerGas
+		if baseFee == nil {
+			if event.MaxFeePerGas != nil {
+				return event.MaxFeePerGas
+			}
+			// Fallback to GasPrice if MaxFeePerGas is not set
+			return event.GasPrice
+		}
+
+		// Compute: min(MaxPriorityFeePerGas + baseFee, MaxFeePerGas)
+		if event.MaxPriorityFeePerGas != nil && event.MaxFeePerGas != nil {
+			effectivePrice := new(big.Int).Add(event.MaxPriorityFeePerGas, baseFee)
+			if effectivePrice.Cmp(event.MaxFeePerGas) > 0 {
+				return event.MaxFeePerGas
+			}
+			return effectivePrice
+		}
+
+		// Fallback to GasPrice if EIP-1559 fields are not set
+		return event.GasPrice
+
+	default:
+		// Unknown type, use GasPrice
+		return event.GasPrice
+	}
 }
 
 // OnTxEnd is called at the end of transaction execution
@@ -745,24 +656,6 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	t.transaction.EndOrdinal = t.blockOrdinal.Next()
 
 	return t.transaction
-}
-
-// ReceiptData contains the minimal receipt data needed
-type ReceiptData struct {
-	TransactionIndex  uint32
-	GasUsed           uint64
-	Status            uint64
-	Logs              []LogData
-	CumulativeGasUsed uint64
-	BlobGasUsed       uint64 // EIP-4844: Gas used for blob data
-	BlobGasPrice      *big.Int // EIP-4844: Price per unit of blob gas
-}
-
-// LogData contains log event data
-type LogData struct {
-	Address [20]byte
-	Topics  [][32]byte
-	Data    []byte
 }
 
 func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionReceipt {
@@ -1266,14 +1159,6 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScop
 
 	// This would add detailed opcode-level tracing
 	// For now, we skip it as it's very verbose
-}
-
-// OpcodeScopeData contains the execution scope for an opcode
-type OpcodeScopeData struct {
-	Memory   []byte
-	Stack    [][]byte
-	Contract []byte
-	CodeAddr [20]byte
 }
 
 // OnKeccakPreimage is called when a keccak256 preimage is available

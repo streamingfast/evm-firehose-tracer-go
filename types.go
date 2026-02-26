@@ -2,7 +2,10 @@ package firehose
 
 import (
 	"encoding/hex"
+	"errors"
 	"math/big"
+
+	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 )
 
 // Minimal type system for Firehose Tracer
@@ -144,6 +147,24 @@ type SetCodeAuthorization struct {
 	S       [32]byte
 }
 
+// ReceiptData contains the minimal receipt data needed
+type ReceiptData struct {
+	TransactionIndex  uint32
+	GasUsed           uint64
+	Status            uint64
+	Logs              []LogData
+	CumulativeGasUsed uint64
+	BlobGasUsed       uint64   // EIP-4844: Gas used for blob data
+	BlobGasPrice      *big.Int // EIP-4844: Price per unit of blob gas
+}
+
+// LogData contains log event data
+type LogData struct {
+	Address [20]byte
+	Topics  [][32]byte
+	Data    []byte
+}
+
 // CallFrame contains the data for OnCallEnter/OnCallExit
 type CallFrame struct {
 	Type        CallType
@@ -168,6 +189,14 @@ const (
 	CallTypeStaticCall   CallType = 0xfa // STATICCALL opcode
 	CallTypeSelfDestruct CallType = 0xff // SELFDESTRUCT opcode (placeholder, handled specially)
 )
+
+// OpcodeScopeData contains the execution scope for an opcode
+type OpcodeScopeData struct {
+	Memory   []byte
+	Stack    [][]byte
+	Contract []byte
+	CodeAddr [20]byte
+}
 
 // Address represents an Ethereum address (20 bytes)
 // Can be used interchangeably with common.Address from go-ethereum
@@ -240,3 +269,35 @@ var BigIntZero = big.NewInt(0)
 
 // BigIntOne is a shared one big.Int for convenience
 var BigIntOne = big.NewInt(1)
+
+// bigIntToProtobuf converts a big.Int to protobuf BigInt
+// Matches the semantics of firehoseBigIntFromNative in go-ethereum:
+// - Returns nil for both nil and zero values
+// - Only non-zero values get encoded
+func bigIntToProtobuf(i *big.Int) *pbeth.BigInt {
+	if i == nil || i.Sign() == 0 {
+		return nil
+	}
+	return &pbeth.BigInt{Bytes: i.Bytes()}
+}
+
+// errorIsString checks if an error matches a target error message by walking the error chain
+// This is NOT a replacement for errors.Is - it uses string matching to avoid importing vm package
+// Geth errors when unwrapped will always lead to pure string comparison
+func errorIsString(err error, target string) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check current error message with exact string equality
+	if err.Error() == target {
+		return true
+	}
+
+	// Unwrap and check wrapped errors recursively
+	if unwrapped := errors.Unwrap(err); unwrapped != nil {
+		return errorIsString(unwrapped, target)
+	}
+
+	return false
+}

@@ -331,9 +331,10 @@ func hexCharToByte(c byte) byte {
 }
 
 // Common test addresses (for readability in tests)
+// These are derived from deterministic private keys defined in testing_helpers.go
 var (
-	Alice   = "0x0000000000000000000000000000000000000001"
-	Bob     = "0x0000000000000000000000000000000000000002"
-	Charlie = "0x0000000000000000000000000000000000000003"
-	Miner   = "0x0000000000000000000000000000000000000004"
+	Alice   = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+	Bob     = "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+	Charlie = "0x6813eb9362372eef6200f3b1dbc3f819671cba69"
+	Miner   = "0x1eff47bc3a10a45d4b230b5d10e37751fe6aa718"
 )

@@ -10,7 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -53,7 +55,7 @@ func (e *wrapError) Unwrap() error {
 // the hash and size by running the test and copying values from the native tracer output.
 var TestBlock = (&BlockEventBuilder{}).
 	Number(100).
-	Hash("0x1a8717837b7c5f4f566e842ede0fbea43334985922b6cb2c0aee8cdd9d2155ab"). // Computed by native Geth tracer
+	Hash("0xe74fcc728df762055c71a999736bb89dd47c541807c3021a1b94de6761afaf25"). // Computed by native Geth tracer with new addresses
 	ParentHash("0x0000000000000000000000000000000000000000000000000000000000000063").
 	Timestamp(1704067200).
 	Coinbase(Miner).
@@ -64,14 +66,10 @@ var TestBlock = (&BlockEventBuilder{}).
 	Build()
 
 // TestLegacyTrx provides a legacy (type 0) test transaction
-// IMPORTANT: Until native validator code is removed, this transaction MUST produce
-// the exact same hash as the native Geth tracer would compute for testing purposes.
-// The hash below is computed by the native Geth tracer for this exact transaction.
-// If you change any transaction parameters, you MUST recompute the hash by running
-// the test and copying the value from the native tracer output.
+// The hash is computed at runtime by the native validator in OnTxStart
 var TestLegacyTrx = new(TxEventBuilder).
 	Type(TxTypeLegacy).
-	Hash("0x369df3fa101750c8064a9df0e841c99449343540b13e7dd3f091daa645189e9c"). // Computed by native Geth tracer
+	Hash("0x0000000000000000000000000000000000000000000000000000000000000000"). // Placeholder, computed by native validator
 	From(Alice).
 	To(Bob).
 	Value(bigInt(100)).   // 100 wei
@@ -131,6 +129,8 @@ var TestBlobTrx = new(TxEventBuilder).
 	Build()
 
 // TestSetCodeTrx provides an EIP-7702 set code (type 4) test transaction
+// NOTE: This uses placeholder signatures. For proper validation tests,
+// use CreateValidSetCodeTrxEvent() from eip7702_test.go
 var TestSetCodeTrx = new(TxEventBuilder).
 	Type(TxTypeSetCode).
 	Hash("0x0000000000000000000000000000000000000000000000000000000000000004"). // Placeholder
@@ -224,6 +224,22 @@ func (s *TracerTester) StartBlockBlobTrx() *TracerTester {
 // StartBlockSetCodeTrx starts a block and an EIP-7702 set code (type 4) transaction
 func (s *TracerTester) StartBlockSetCodeTrx() *TracerTester {
 	return s.startBlockTrxWithEvent(TestSetCodeTrx)
+}
+
+// StartBlockSetCodeTrxSigned starts a block and an EIP-7702 set code (type 4) transaction
+// with properly signed authorization that will pass native tracer validation.
+// Returns the authorizer address (the account that signed the authorization).
+func (s *TracerTester) StartBlockSetCodeTrxSigned() (*TracerTester, common.Address, error) {
+	// Create a properly signed SetCode transaction
+	txEvent, authorizerKey, err := CreateValidSetCodeTrxEvent()
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+
+	// Get the authorizer address from the key
+	authorizerAddr := crypto.PubkeyToAddress(authorizerKey.PublicKey)
+
+	return s.startBlockTrxWithEvent(*txEvent), authorizerAddr, nil
 }
 
 // StartBlockTrxNoHooks starts a block and transaction WITHOUT automatic hooks

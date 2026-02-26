@@ -5,6 +5,7 @@ import (
 
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestTracer_TxTypes tests all transaction types
@@ -22,8 +23,8 @@ func TestTracer_TxTypes(t *testing.T) {
 				// Validate transaction type
 				assert.Equal(t, pbeth.TransactionTrace_TRX_TYPE_LEGACY, trx.Type)
 
-				// Validate basic transaction fields
-				assert.Equal(t, TestLegacyTrx.Hash[:], trx.Hash)
+				// Validate basic transaction fields (hash is computed by native validator)
+				assert.NotEmpty(t, trx.Hash, "Hash should be set")
 				assert.Equal(t, AliceAddr[:], trx.From)
 				assert.Equal(t, BobAddr[:], trx.To)
 				assert.Equal(t, uint64(100), trx.Value.Uint64())
@@ -114,14 +115,15 @@ func TestTracer_TxTypes(t *testing.T) {
 	})
 
 	t.Run("set_code", func(t *testing.T) {
-		// TODO: This test is skipped because it requires proper EIP-7702 authorization signatures
-		// for full validation against the native tracer. The native tracer validates authorization
-		// signatures and sets the Discarded flag for invalid ones, while our shared tracer copies
-		// the data as-is. We need to generate proper signatures for this test to pass full validation.
-		t.Skip("Skipping set_code test until proper EIP-7702 authorization signatures are implemented")
+		// Use properly signed SetCode transaction with valid EIP-7702 authorization
+		tester, authorizerAddr, err := NewTracerTester(t).StartBlockSetCodeTrxSigned()
+		require.NoError(t, err, "Failed to create signed SetCode transaction")
 
-		NewTracerTester(t).
-			StartBlockSetCodeTrx().
+		// EIP-7702: Authorization application happens BEFORE the root call
+		// The authorizer's nonce is incremented when the authorization is applied
+		tester.NonceChange(authorizerAddr, 0, 1)
+
+		tester.
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -130,11 +132,7 @@ func TestTracer_TxTypes(t *testing.T) {
 				trx := block.TransactionTraces[0]
 
 				// Validate transaction type
-				// Note: Native tracer may use DYNAMIC_FEE as fallback until SetCodeTx is fully supported
-				assert.Contains(t, []pbeth.TransactionTrace_Type{
-					pbeth.TransactionTrace_TRX_TYPE_SET_CODE,
-					pbeth.TransactionTrace_TRX_TYPE_DYNAMIC_FEE,
-				}, trx.Type, "Type should be SET_CODE or DYNAMIC_FEE (fallback)")
+				assert.Equal(t, pbeth.TransactionTrace_TRX_TYPE_SET_CODE, trx.Type, "Type should be SET_CODE")
 
 				// Validate basic transaction fields (hash is computed by native validator)
 				assert.NotEmpty(t, trx.Hash, "Hash should be set")
@@ -147,6 +145,11 @@ func TestTracer_TxTypes(t *testing.T) {
 				auth := trx.SetCodeAuthorizations[0]
 				assert.Equal(t, CharlieAddr[:], auth.Address, "Authorization address should match")
 				assert.Equal(t, uint64(0), auth.Nonce, "Authorization nonce should be 0")
+
+				// Validate that the authorization signature is valid and was applied
+				// The native validator verifies the signature and checks for a nonce change
+				assert.False(t, auth.Discarded, "Authorization should not be discarded (signature is valid and nonce was incremented)")
+				assert.NotEmpty(t, auth.Authority, "Authority should be populated with the signer's address")
 			})
 	})
 }

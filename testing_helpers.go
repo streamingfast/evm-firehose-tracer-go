@@ -1,16 +1,48 @@
 package firehose
 
 import (
+	"crypto/ecdsa"
 	"math/big"
+
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Common test address constants
+// Common test private keys and derived addresses
+// These are deterministic keys for reproducible testing
 var (
-	AliceAddr   = addressFromHex(Alice)
-	BobAddr     = addressFromHex(Bob)
-	CharlieAddr = addressFromHex(Charlie)
-	MinerAddr   = addressFromHex(Miner)
+	// AliceKey is Alice's private key (deterministic for testing)
+	AliceKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000001")
+	// BobKey is Bob's private key (deterministic for testing)
+	BobKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000002")
+	// CharlieKey is Charlie's private key (deterministic for testing)
+	CharlieKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000003")
+	// MinerKey is the miner's private key (deterministic for testing)
+	MinerKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000004")
+
+	// Addresses derived from private keys (as [20]byte for tracer use)
+	AliceAddr   = [20]byte(crypto.PubkeyToAddress(AliceKey.PublicKey))
+	BobAddr     = [20]byte(crypto.PubkeyToAddress(BobKey.PublicKey))
+	CharlieAddr = [20]byte(crypto.PubkeyToAddress(CharlieKey.PublicKey))
+	MinerAddr   = [20]byte(crypto.PubkeyToAddress(MinerKey.PublicKey))
 )
+
+// GetTestPrivateKey returns a private key for a test address
+// This is useful when you need to sign transactions or authorizations
+func GetTestPrivateKey(addr [20]byte) *ecdsa.PrivateKey {
+	if addr == AliceAddr {
+		return AliceKey
+	}
+	if addr == BobAddr {
+		return BobKey
+	}
+	if addr == CharlieAddr {
+		return CharlieKey
+	}
+	if addr == MinerAddr {
+		return MinerKey
+	}
+	return nil
+}
 
 // System call address constants (matching go-ethereum params package)
 var (

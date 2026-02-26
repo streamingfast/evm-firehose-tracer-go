@@ -5,6 +5,21 @@ import (
 	"math/big"
 )
 
+// SetCodeAuthRecovery is a function that recovers the authority (signer address) from a SetCodeAuthorization
+// This is chain-specific because different chains may have different signature schemes
+// For Ethereum/EVM chains, this typically uses ECDSA signature recovery
+//
+// Parameters:
+//   - chainID: The chain ID used in the authorization
+//   - address: The address being delegated to
+//   - nonce: The nonce in the authorization
+//   - v, r, s: The signature components
+//
+// Returns:
+//   - [20]byte: The recovered authority address (signer)
+//   - error: Error if signature recovery fails
+type SetCodeAuthRecovery func(chainID [32]byte, address [20]byte, nonce uint64, v uint32, r, s [32]byte) ([20]byte, error)
+
 // ChainConfig defines the chain configuration for the tracer
 // Simplified version - assumes all historical forks are active
 // Only tracks future timestamp-based forks that may affect tracing behavior
@@ -17,6 +32,11 @@ type ChainConfig struct {
 	CancunTime   *uint64 // EIP-4844 (blobs), EIP-1153 (transient storage), EIP-5656, EIP-6780
 	PragueTime   *uint64 // EIP-7702 (set code), EIP-2537 (BLS precompile)
 	VerkleTime   *uint64 // Verkle tree transition (future)
+
+	// SetCodeAuthRecovery is a chain-specific function to recover authority from EIP-7702 authorizations
+	// If nil, SetCode authorizations will not have their Authority field populated
+	// Chain implementations should provide this to enable proper SetCode validation
+	SetCodeAuthRecovery SetCodeAuthRecovery
 }
 
 // IsShanghai returns whether the given timestamp is >= Shanghai fork
