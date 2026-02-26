@@ -26,13 +26,15 @@ func TestCallStack_SingleCall(t *testing.T) {
 	cs := NewCallStack()
 
 	call := &pbeth.Call{
-		Index:    0,
 		CallType: pbeth.CallType_CALL,
 	}
 
-	// Push
+	// Push - Index, Depth, and ParentIndex are set by Push()
 	cs.Push(call)
 
+	assert.Equal(t, uint32(1), call.Index, "first call should have index 1")
+	assert.Equal(t, uint32(0), call.Depth, "first call should have depth 0")
+	assert.Equal(t, uint32(0), call.ParentIndex, "first call should have parent index 0")
 	assert.Equal(t, 1, cs.Depth(), "depth after push should be 1")
 	assert.True(t, cs.HasActiveCall(), "should have active call")
 	assert.Equal(t, call, cs.Peek(), "peek should return the call")
@@ -52,13 +54,16 @@ func TestCallStack_SingleCall(t *testing.T) {
 func TestCallStack_NestedCalls(t *testing.T) {
 	cs := NewCallStack()
 
-	// Create nested calls
-	call0 := &pbeth.Call{Index: 0, CallType: pbeth.CallType_CALL}
-	call1 := &pbeth.Call{Index: 1, CallType: pbeth.CallType_CALL}
-	call2 := &pbeth.Call{Index: 2, CallType: pbeth.CallType_DELEGATE}
+	// Create nested calls - Index, Depth, ParentIndex set by Push()
+	call0 := &pbeth.Call{CallType: pbeth.CallType_CALL}
+	call1 := &pbeth.Call{CallType: pbeth.CallType_CALL}
+	call2 := &pbeth.Call{CallType: pbeth.CallType_DELEGATE}
 
 	// Push depth 1
 	cs.Push(call0)
+	assert.Equal(t, uint32(1), call0.Index)
+	assert.Equal(t, uint32(0), call0.Depth)
+	assert.Equal(t, uint32(0), call0.ParentIndex)
 	assert.Equal(t, 1, cs.Depth())
 	assert.Equal(t, call0, cs.Peek())
 	assert.Equal(t, call0, cs.Root())
@@ -66,19 +71,25 @@ func TestCallStack_NestedCalls(t *testing.T) {
 
 	// Push depth 2
 	cs.Push(call1)
+	assert.Equal(t, uint32(2), call1.Index)
+	assert.Equal(t, uint32(1), call1.Depth)
+	assert.Equal(t, uint32(1), call1.ParentIndex)
 	assert.Equal(t, 2, cs.Depth())
 	assert.Equal(t, call1, cs.Peek())
 	assert.Equal(t, call0, cs.Root())
 	assert.Equal(t, call0, cs.Parent())
-	assert.Equal(t, uint32(0), cs.ParentIndex())
+	assert.Equal(t, uint32(1), cs.ParentIndex())
 
 	// Push depth 3
 	cs.Push(call2)
+	assert.Equal(t, uint32(3), call2.Index)
+	assert.Equal(t, uint32(2), call2.Depth)
+	assert.Equal(t, uint32(2), call2.ParentIndex)
 	assert.Equal(t, 3, cs.Depth())
 	assert.Equal(t, call2, cs.Peek())
 	assert.Equal(t, call0, cs.Root())
 	assert.Equal(t, call1, cs.Parent())
-	assert.Equal(t, uint32(1), cs.ParentIndex())
+	assert.Equal(t, uint32(2), cs.ParentIndex())
 
 	// Pop depth 3 -> 2
 	popped := cs.Pop()
@@ -107,15 +118,17 @@ func TestCallStack_DeepNesting(t *testing.T) {
 	// Push many calls
 	calls := make([]*pbeth.Call, depth)
 	for i := 0; i < depth; i++ {
-		calls[i] = &pbeth.Call{Index: uint32(i), CallType: pbeth.CallType_CALL}
+		calls[i] = &pbeth.Call{CallType: pbeth.CallType_CALL}
 		cs.Push(calls[i])
+		// Verify Push() set Index correctly (starts at 1)
+		assert.Equal(t, uint32(i+1), calls[i].Index)
 	}
 
 	assert.Equal(t, depth, cs.Depth())
 	assert.Equal(t, calls[depth-1], cs.Peek())
 	assert.Equal(t, calls[0], cs.Root())
 	assert.Equal(t, calls[depth-2], cs.Parent())
-	assert.Equal(t, uint32(depth-2), cs.ParentIndex())
+	assert.Equal(t, uint32(depth-1), cs.ParentIndex()) // Last call's index
 
 	// Pop all calls
 	for i := depth - 1; i >= 0; i-- {
@@ -132,9 +145,9 @@ func TestCallStack_Reset(t *testing.T) {
 	cs := NewCallStack()
 
 	// Push some calls
-	cs.Push(&pbeth.Call{Index: 0})
-	cs.Push(&pbeth.Call{Index: 1})
-	cs.Push(&pbeth.Call{Index: 2})
+	cs.Push(&pbeth.Call{CallType: pbeth.CallType_CALL})
+	cs.Push(&pbeth.Call{CallType: pbeth.CallType_CALL})
+	cs.Push(&pbeth.Call{CallType: pbeth.CallType_CALL})
 
 	require.Equal(t, 3, cs.Depth())
 
@@ -146,6 +159,11 @@ func TestCallStack_Reset(t *testing.T) {
 	assert.Nil(t, cs.Peek())
 	assert.Nil(t, cs.Root())
 	assert.Nil(t, cs.Parent())
+
+	// After reset, next push should start at index 1 again
+	call := &pbeth.Call{CallType: pbeth.CallType_CALL}
+	cs.Push(call)
+	assert.Equal(t, uint32(1), call.Index)
 }
 
 // TestCallStack_ParentIndex tests ParentIndex method
@@ -156,14 +174,17 @@ func TestCallStack_ParentIndex(t *testing.T) {
 	assert.Equal(t, uint32(0), cs.ParentIndex())
 
 	// Root call (no parent)
-	cs.Push(&pbeth.Call{Index: 10})
+	call1 := &pbeth.Call{CallType: pbeth.CallType_CALL}
+	cs.Push(call1)
 	assert.Equal(t, uint32(0), cs.ParentIndex())
 
-	// Child call (has parent with index 10)
-	cs.Push(&pbeth.Call{Index: 20})
-	assert.Equal(t, uint32(10), cs.ParentIndex())
+	// Child call (has parent)
+	call2 := &pbeth.Call{CallType: pbeth.CallType_CALL}
+	cs.Push(call2)
+	assert.Equal(t, uint32(1), cs.ParentIndex()) // Parent is call1 with index 1
 
-	// Grandchild call (has parent with index 20)
-	cs.Push(&pbeth.Call{Index: 30})
-	assert.Equal(t, uint32(20), cs.ParentIndex())
+	// Grandchild call (has parent)
+	call3 := &pbeth.Call{CallType: pbeth.CallType_CALL}
+	cs.Push(call3)
+	assert.Equal(t, uint32(2), cs.ParentIndex()) // Parent is call2 with index 2
 }

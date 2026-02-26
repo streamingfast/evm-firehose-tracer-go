@@ -116,8 +116,8 @@ func NewTracer(config *Config) *Tracer {
 		deferredCallState:       NewDeferredCallState(),
 		latestCallEnterSuicided: false,
 
-		// Validation state
-		nativeValidator: &nativeValidator{},
+		// Validation state (set explicitly in tests via newNativeValidator)
+		nativeValidator: nil,
 	}
 
 	// Set up concurrent flushing if enabled
@@ -248,6 +248,45 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
+// computeEffectiveGasPrice computes the effective gas price for a transaction
+// following the same logic as go-ethereum's gasPrice function:
+// - For legacy/access list transactions: use GasPrice
+// - For EIP-1559 transactions (dynamic fee, blob, set code):
+//   - If baseFee is nil: use MaxFeePerGas (GasFeeCap)
+//   - If baseFee is set: use min(MaxPriorityFeePerGas + baseFee, MaxFeePerGas)
+func computeEffectiveGasPrice(event TxEvent, baseFee *big.Int) *big.Int {
+	switch event.Type {
+	case 0, 1: // Legacy, AccessList
+		return event.GasPrice
+
+	case 2, 3, 4: // DynamicFee, Blob, SetCode
+		// For EIP-1559 transactions, if baseFee is nil, use MaxFeePerGas
+		if baseFee == nil {
+			if event.MaxFeePerGas != nil {
+				return event.MaxFeePerGas
+			}
+			// Fallback to GasPrice if MaxFeePerGas is not set
+			return event.GasPrice
+		}
+
+		// Compute: min(MaxPriorityFeePerGas + baseFee, MaxFeePerGas)
+		if event.MaxPriorityFeePerGas != nil && event.MaxFeePerGas != nil {
+			effectivePrice := new(big.Int).Add(event.MaxPriorityFeePerGas, baseFee)
+			if effectivePrice.Cmp(event.MaxFeePerGas) > 0 {
+				return event.MaxFeePerGas
+			}
+			return effectivePrice
+		}
+
+		// Fallback to GasPrice if EIP-1559 fields are not set
+		return event.GasPrice
+
+	default:
+		// Unknown type, use GasPrice
+		return event.GasPrice
+	}
+}
+
 // bigIntToProtobuf converts a big.Int to protobuf BigInt
 // Matches the semantics of firehoseBigIntFromNative in go-ethereum:
 // - Returns nil for both nil and zero values
@@ -271,7 +310,9 @@ func bigIntToProtobuf(i *big.Int) *pbeth.BigInt {
 
 // OnBlockchainInit is called once when the blockchain is initialized
 func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConfig *ChainConfig) {
-	t.nativeValidator.OnBlockchainInit(chainConfig)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnBlockchainInit(chainConfig)
+	}
 
 	t.chainConfig = chainConfig
 
@@ -301,7 +342,9 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent) {
 
 // OnBlockStart is called at the beginning of block processing
 func (t *Tracer) OnBlockStart(event BlockEvent) {
-	t.nativeValidator.OnBlockStart(event)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnBlockStart(event)
+	}
 
 	block := event.Block
 
@@ -325,7 +368,7 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 		Hash:   block.Hash[:],
 		Number: block.Number,
 		Header: t.newBlockHeaderFromBlockData(block),
-		Ver:    3,
+		Ver:    4, // Protocol version 4 (without backward compatibility)
 		Size:   block.Size,
 	}
 
@@ -360,7 +403,9 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 
 // OnBlockEnd is called at the end of block processing
 func (t *Tracer) OnBlockEnd(err error) {
-	t.nativeValidator.OnBlockEnd(err)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnBlockEnd(err)
+	}
 
 	firehoseInfo("block ending (err=%v)", err)
 
@@ -500,9 +545,17 @@ func (t *Tracer) reorderIsolatedTransactionsAndOrdinals() {
 
 // OnTxStart is called at the beginning of transaction execution
 func (t *Tracer) OnTxStart(event TxEvent) {
-	t.nativeValidator.OnTxStart(event, event.From)
+	if t.nativeValidator != nil {
+		// Get the transaction hash computed by the native go-ethereum tracer
+		// This ensures we use the correct hash for all transaction types
+		nativeHash := t.nativeValidator.OnTxStart(event, event.From)
+		event.Hash = nativeHash
+	}
 
 	firehoseInfo("trx start (hash=%x type=%d gas=%d isolated=%t)", event.Hash, event.Type, event.Gas, t.transactionIsolated)
+
+	// Compute effective gas price based on transaction type
+	effectiveGasPrice := computeEffectiveGasPrice(event, t.blockBaseFee)
 
 	// Create transaction trace
 	trx := &pbeth.TransactionTrace{
@@ -511,7 +564,7 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 		From:         event.From[:],
 		Nonce:        event.Nonce,
 		GasLimit:     event.Gas,
-		GasPrice:     bigIntToProtobuf(event.GasPrice),
+		GasPrice:     bigIntToProtobuf(effectiveGasPrice),
 		Value:        bigIntToProtobuf(event.Value),
 		Input:        event.Input,
 		Type:         pbeth.TransactionTrace_Type(event.Type),
@@ -522,12 +575,70 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 		trx.To = event.To[:]
 	}
 
+	// Set EIP-1559 fields (type 2, 3, 4)
+	if event.MaxFeePerGas != nil {
+		trx.MaxFeePerGas = bigIntToProtobuf(event.MaxFeePerGas)
+	}
+	if event.MaxPriorityFeePerGas != nil {
+		trx.MaxPriorityFeePerGas = bigIntToProtobuf(event.MaxPriorityFeePerGas)
+	}
+
+	// Set access list (type 1, 2)
+	if len(event.AccessList) > 0 {
+		trx.AccessList = make([]*pbeth.AccessTuple, len(event.AccessList))
+		for i, tuple := range event.AccessList {
+			pbTuple := &pbeth.AccessTuple{
+				Address: tuple.Address[:],
+			}
+			if len(tuple.StorageKeys) > 0 {
+				pbTuple.StorageKeys = make([][]byte, len(tuple.StorageKeys))
+				for j, key := range tuple.StorageKeys {
+					pbTuple.StorageKeys[j] = key[:]
+				}
+			}
+			trx.AccessList[i] = pbTuple
+		}
+	}
+
+	// Set EIP-4844 blob fields (type 3)
+	if event.BlobGasFeeCap != nil {
+		trx.BlobGasFeeCap = bigIntToProtobuf(event.BlobGasFeeCap)
+	}
+	if len(event.BlobHashes) > 0 {
+		trx.BlobHashes = make([][]byte, len(event.BlobHashes))
+		for i, hash := range event.BlobHashes {
+			trx.BlobHashes[i] = hash[:]
+		}
+
+		// Compute BlobGas: each blob consumes 131072 gas (DATA_GAS_PER_BLOB)
+		const blobGasPerBlob = 131072 // 1 << 17
+		blobGas := uint64(len(event.BlobHashes)) * blobGasPerBlob
+		trx.BlobGas = &blobGas
+	}
+
+	// Set EIP-7702 set code authorization list (type 4)
+	if len(event.SetCodeAuthorizations) > 0 {
+		trx.SetCodeAuthorizations = make([]*pbeth.SetCodeAuthorization, len(event.SetCodeAuthorizations))
+		for i, auth := range event.SetCodeAuthorizations {
+			trx.SetCodeAuthorizations[i] = &pbeth.SetCodeAuthorization{
+				ChainId: auth.ChainID[:],
+				Address: auth.Address[:],
+				Nonce:   auth.Nonce,
+				V:       auth.V,
+				R:       auth.R[:],
+				S:       auth.S[:],
+			}
+		}
+	}
+
 	t.transaction = trx
 }
 
 // OnTxEnd is called at the end of transaction execution
 func (t *Tracer) OnTxEnd(receipt *ReceiptData, err error) {
-	t.nativeValidator.OnTxEnd(receipt, err)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnTxEnd(receipt, err)
+	}
 
 	firehoseInfo("trx ending (isolated=%t, err=%v)", t.transactionIsolated, err)
 
@@ -597,6 +708,8 @@ type ReceiptData struct {
 	Status            uint64
 	Logs              []LogData
 	CumulativeGasUsed uint64
+	BlobGasUsed       uint64 // EIP-4844: Gas used for blob data
+	BlobGasPrice      *big.Int // EIP-4844: Price per unit of blob gas
 }
 
 // LogData contains log event data
@@ -610,6 +723,14 @@ func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionRece
 	r := &pbeth.TransactionReceipt{
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
 		LogsBloom:         make([]byte, 256), // TODO: Compute logs bloom
+	}
+
+	// Add EIP-4844 blob fields for blob transactions (type 3)
+	if t.transaction.Type == pbeth.TransactionTrace_TRX_TYPE_BLOB {
+		r.BlobGasUsed = &receipt.BlobGasUsed
+		if receipt.BlobGasPrice != nil {
+			r.BlobGasPrice = bigIntToProtobuf(receipt.BlobGasPrice)
+		}
 	}
 
 	// Add logs
@@ -647,32 +768,31 @@ func (t *Tracer) markStateReverted(call *pbeth.Call) {
 // ============================================================================
 
 // OnCallEnter is called when entering a call
-func (t *Tracer) OnCallEnter(frame CallFrame) {
-	depth := t.callStack.Depth()
-	t.nativeValidator.OnCallEnter(depth, byte(frame.Type), frame.From, frame.To, frame.Input, frame.Gas, frame.Value)
+func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byte, gas uint64, value *big.Int) {
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnCallEnter(depth, typ, from, to, input, gas, value)
+	}
 
 	firehoseTrace("call enter (depth=%d type=%d from=%s to=%s value=%d gas=%d input=%s)",
-		depth, frame.Type, shortAddressView(&frame.From), shortAddressView(&frame.To),
-		frame.Value, frame.Gas, inputView(frame.Input))
+		depth, typ, shortAddressView(&from), shortAddressView(&to),
+		value, gas, inputView(input))
 
 	call := &pbeth.Call{
-		Index:        uint32(len(t.transaction.Calls)),
-		ParentIndex:  t.callStack.ParentIndex(),
-		Depth:        uint32(depth),
-		CallType:     t.callTypeToProto(frame.Type),
-		Caller:       frame.From[:],
-		Address:      frame.To[:],
-		Value:        &pbeth.BigInt{Bytes: frame.Value.Bytes()},
-		GasLimit:     frame.Gas,
+		// Index, Depth, and ParentIndex are set by callStack.Push()
+		CallType:     t.callTypeToProto(CallType(typ)),
+		Caller:       from[:],
+		Address:      to[:],
+		Value:        &pbeth.BigInt{Bytes: value.Bytes()},
+		GasLimit:     gas,
 		GasConsumed:  0,
-		Input:        frame.Input,
+		Input:        input,
 		BeginOrdinal: t.blockOrdinal.Next(),
 	}
 
 	// Handle DELEGATECALL code address
 	// Note: CodeAddress field may not exist in all protobuf versions
-	// if frame.Type == CallTypeDelegateCall && frame.CodeAddress != nil {
-	// 	call.CodeAddress = frame.CodeAddress[:]
+	// if typ == byte(CallTypeDelegateCall) && codeAddress != nil {
+	// 	call.CodeAddress = codeAddress[:]
 	// }
 
 	// Move deferred state to this call if it's the first call
@@ -694,7 +814,9 @@ func (t *Tracer) OnCallExit(output []byte, gasUsed uint64, err error) {
 
 	depth := t.callStack.Depth() - 1 // -1 because we haven't popped yet
 	reverted := err != nil
-	t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
+	}
 
 	firehoseTrace("call exit (depth=%d gas_used=%d err=%s output=%s)",
 		call.Depth, gasUsed, errorView(err), outputView(output))
@@ -740,7 +862,9 @@ func (t *Tracer) callTypeToProto(ct CallType) pbeth.CallType {
 // OnBalanceChange is called when an account balance changes
 // Note: reason is pbeth.BalanceChange_Reason - the chain implementation converts from go-ethereum types
 func (t *Tracer) OnBalanceChange(addr [20]byte, oldBalance, newBalance *big.Int, reason pbeth.BalanceChange_Reason) {
-	t.nativeValidator.OnBalanceChange(addr, oldBalance, newBalance, reason)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnBalanceChange(addr, oldBalance, newBalance, reason)
+	}
 
 	// Ignore unspecified reasons
 	if reason == pbeth.BalanceChange_REASON_UNKNOWN {
@@ -787,7 +911,9 @@ func (t *Tracer) newBalanceChange(tag string, addr [20]byte, oldValue, newValue 
 
 // OnNonceChange is called when an account nonce changes
 func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
-	t.nativeValidator.OnNonceChange(addr, oldNonce, newNonce)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnNonceChange(addr, oldNonce, newNonce)
+	}
 
 	t.ensureInBlockAndInTrx()
 
@@ -811,7 +937,9 @@ func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
 // OnCodeChange is called when contract code changes
 // Note: Includes code hashes for proper tracking
 func (t *Tracer) OnCodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]byte, oldCode, newCode []byte) {
-	t.nativeValidator.OnCodeChange(addr, prevCodeHash, newCodeHash, oldCode, newCode)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnCodeChange(addr, prevCodeHash, newCodeHash, oldCode, newCode)
+	}
 
 	firehoseDebug("code changed (address=%s prev_hash=%x new_hash=%x)",
 		shortAddressView(&addr), prevCodeHash, newCodeHash)
@@ -857,7 +985,9 @@ func (t *Tracer) newCodeChange(addr [20]byte, prevCodeHash [32]byte, oldCode []b
 
 // OnStorageChange is called when contract storage changes
 func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) {
-	t.nativeValidator.OnStorageChange(addr, slot, oldValue, newValue)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnStorageChange(addr, slot, oldValue, newValue)
+	}
 
 	firehoseTrace("storage changed (address=%s key=%x, before=%x after=%x)",
 		shortAddressView(&addr), slot, oldValue, newValue)
@@ -881,7 +1011,9 @@ func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byt
 // OnLog is called when a log event is emitted
 // Note: blockIndex comes from the log itself (from go-ethereum types.Log.Index)
 func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) {
-	t.nativeValidator.OnLog(nil)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnLog(addr, topics, data, blockIndex)
+	}
 
 	t.ensureInBlockAndInTrxAndInCall()
 
@@ -908,7 +1040,9 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 // OnGasChange is called when gas is consumed
 // Note: reason is pbeth.GasChange_Reason - the chain implementation converts from go-ethereum types
 func (t *Tracer) OnGasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) {
-	t.nativeValidator.OnGasChange(oldGas, newGas, reason)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnGasChange(oldGas, newGas, reason)
+	}
 
 	t.ensureInBlockAndInTrx()
 

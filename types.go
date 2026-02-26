@@ -109,6 +109,39 @@ type TxEvent struct {
 	GasPrice *big.Int
 	Nonce    uint64
 	Index    uint32
+
+	// EIP-1559 fields (type 2)
+	MaxFeePerGas         *big.Int
+	MaxPriorityFeePerGas *big.Int
+
+	// EIP-2930/EIP-1559 access list (type 1, 2)
+	AccessList AccessList
+
+	// EIP-4844 blob fields (type 3)
+	BlobGasFeeCap *big.Int
+	BlobHashes    [][32]byte
+
+	// EIP-7702 set code authorization list (type 4)
+	SetCodeAuthorizations []SetCodeAuthorization
+}
+
+// AccessList represents EIP-2930 access list
+type AccessList []AccessTuple
+
+// AccessTuple is a single entry in an access list
+type AccessTuple struct {
+	Address     [20]byte
+	StorageKeys [][32]byte
+}
+
+// SetCodeAuthorization represents EIP-7702 authorization
+type SetCodeAuthorization struct {
+	ChainID [32]byte
+	Address [20]byte
+	Nonce   uint64
+	V       uint32
+	R       [32]byte
+	S       [32]byte
 }
 
 // CallFrame contains the data for OnCallEnter/OnCallExit

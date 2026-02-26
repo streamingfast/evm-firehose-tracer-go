@@ -1,0 +1,391 @@
+package firehose
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/base64"
+	"math/big"
+	"strconv"
+	"strings"
+	"testing"
+
+	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+)
+
+// TestBlock provides a standard test block with reasonable defaults
+// This block represents block #100 with typical Ethereum mainnet settings
+//
+// IMPORTANT: Until native validator code is removed, this block MUST produce
+// the exact same hash and size as the native Geth tracer would compute.
+// The hash below is the real Keccak256 hash of the block header with these exact parameters.
+// The size is the RLP-encoded size that Geth computes for this block.
+// If you change any block parameters (timestamp, coinbase, etc.), you MUST recompute
+// the hash and size by running the test and copying values from the native tracer output.
+var TestBlock = (&BlockEventBuilder{}).
+	Number(100).
+	Hash("0x1a8717837b7c5f4f566e842ede0fbea43334985922b6cb2c0aee8cdd9d2155ab"). // Computed by native Geth tracer
+	ParentHash("0x0000000000000000000000000000000000000000000000000000000000000063").
+	Timestamp(1704067200).
+	Coinbase(Miner).
+	GasLimit(30_000_000). // 30M gas (standard Ethereum mainnet)
+	Difficulty(big.NewInt(0)).
+	Size(509).                // RLP-encoded block size computed by Geth
+	Bloom(make([]byte, 256)). // Empty 256-byte logs bloom filter
+	Build()
+
+// TestLegacyTrx provides a legacy (type 0) test transaction
+// IMPORTANT: Until native validator code is removed, this transaction MUST produce
+// the exact same hash as the native Geth tracer would compute for testing purposes.
+// The hash below is computed by the native Geth tracer for this exact transaction.
+// If you change any transaction parameters, you MUST recompute the hash by running
+// the test and copying the value from the native tracer output.
+var TestLegacyTrx = new(TxEventBuilder).
+	Type(TxTypeLegacy).
+	Hash("0x369df3fa101750c8064a9df0e841c99449343540b13e7dd3f091daa645189e9c"). // Computed by native Geth tracer
+	From(Alice).
+	To(Bob).
+	Value(bigInt(100)).   // 100 wei
+	Gas(21000).           // Standard gas for simple transfer
+	GasPrice(bigInt(10)). // 10 wei per gas
+	Nonce(0).
+	Build()
+
+// TestAccessListTrx provides an EIP-2930 access list (type 1) test transaction
+var TestAccessListTrx = new(TxEventBuilder).
+	Type(TxTypeAccessList).
+	Hash("0x0000000000000000000000000000000000000000000000000000000000000001"). // Placeholder
+	From(Alice).
+	To(Bob).
+	Value(bigInt(100)).
+	Gas(21000).
+	GasPrice(bigInt(10)).
+	Nonce(0).
+	AccessList(AccessList{
+		{Address: BobAddr, StorageKeys: [][32]byte{hashFromHex("0x01")}},
+	}).
+	Build()
+
+// TestDynamicFeeTrx provides an EIP-1559 dynamic fee (type 2) test transaction
+var TestDynamicFeeTrx = new(TxEventBuilder).
+	Type(TxTypeDynamicFee).
+	Hash("0x0000000000000000000000000000000000000000000000000000000000000002"). // Placeholder
+	From(Alice).
+	To(Bob).
+	Value(bigInt(100)).
+	Gas(21000).
+	GasPrice(bigInt(10)).             // Effective gas price
+	MaxFeePerGas(bigInt(20)).         // Max fee willing to pay
+	MaxPriorityFeePerGas(bigInt(2)). // Priority fee (tip to miner)
+	AccessList(AccessList{
+		{Address: BobAddr, StorageKeys: [][32]byte{hashFromHex("0x01")}},
+	}).
+	Nonce(0).
+	Build()
+
+// TestBlobTrx provides an EIP-4844 blob (type 3) test transaction
+var TestBlobTrx = new(TxEventBuilder).
+	Type(TxTypeBlob).
+	Hash("0x0000000000000000000000000000000000000000000000000000000000000003"). // Placeholder
+	From(Alice).
+	To(Bob).
+	Value(bigInt(100)).
+	Gas(21000).
+	GasPrice(bigInt(10)).
+	MaxFeePerGas(bigInt(20)).
+	MaxPriorityFeePerGas(bigInt(2)).
+	BlobGasFeeCap(bigInt(5)).
+	BlobHashes([][32]byte{
+		hashFromHex("0x0100000000000000000000000000000000000000000000000000000000000000"),
+	}).
+	Nonce(0).
+	Build()
+
+// TestSetCodeTrx provides an EIP-7702 set code (type 4) test transaction
+var TestSetCodeTrx = new(TxEventBuilder).
+	Type(TxTypeSetCode).
+	Hash("0x0000000000000000000000000000000000000000000000000000000000000004"). // Placeholder
+	From(Alice).
+	To(Bob).
+	Value(bigInt(100)).
+	Gas(21000).
+	GasPrice(bigInt(10)).
+	MaxFeePerGas(bigInt(20)).
+	MaxPriorityFeePerGas(bigInt(2)).
+	SetCodeAuthorizations([]SetCodeAuthorization{
+		{
+			ChainID: hashFromHex("0x01"),
+			Address: CharlieAddr,
+			Nonce:   0,
+			V:       27,
+			R:       hashFromHex("0x01"),
+			S:       hashFromHex("0x01"),
+		},
+	}).
+	Nonce(0).
+	Build()
+
+// TestTrx is the default test transaction (legacy type for backward compatibility)
+var TestTrx = TestLegacyTrx
+
+// TracerTester provides a fluent API for building test testers
+type TracerTester struct {
+	t *testing.T
+
+	Block  *BlockEventBuilder
+	Tracer *Tracer
+}
+
+// NewTracerTester creates a new tester builder with native validator
+func NewTracerTester(t *testing.T) *TracerTester {
+	tester := &TracerTester{
+		t: t,
+		Tracer: NewTracer(&Config{
+			ChainConfig: &ChainConfig{
+				ChainID: big.NewInt(1),
+			},
+			OutputWriter: &bytes.Buffer{},
+		}),
+	}
+
+	var err error
+	tester.Tracer.nativeValidator, err = newNativeValidator("")
+	require.NoError(t, err, "creating native validator")
+
+	tester.Tracer.OnBlockchainInit("test", "1.0.0", tester.Tracer.chainConfig)
+
+	return tester
+}
+
+func (s *TracerTester) StartBlock() *TracerTester {
+	s.Tracer.OnBlockStart(TestBlock)
+	return s
+}
+
+// StartBlockTrx starts a block and a transaction with standard Ethereum initialization
+// This emits the state changes that happen at transaction start:
+// - Nonce increment
+// - Gas buying (balance decrease)
+// - Gas initialization
+// Uses TestTrx (legacy transaction) by default
+func (s *TracerTester) StartBlockTrx() *TracerTester {
+	return s.startBlockTrxWithEvent(TestTrx)
+}
+
+// StartBlockLegacyTrx starts a block and a legacy (type 0) transaction
+func (s *TracerTester) StartBlockLegacyTrx() *TracerTester {
+	return s.startBlockTrxWithEvent(TestLegacyTrx)
+}
+
+// StartBlockAccessListTrx starts a block and an EIP-2930 access list (type 1) transaction
+func (s *TracerTester) StartBlockAccessListTrx() *TracerTester {
+	return s.startBlockTrxWithEvent(TestAccessListTrx)
+}
+
+// StartBlockDynamicFeeTrx starts a block and an EIP-1559 dynamic fee (type 2) transaction
+func (s *TracerTester) StartBlockDynamicFeeTrx() *TracerTester {
+	return s.startBlockTrxWithEvent(TestDynamicFeeTrx)
+}
+
+// StartBlockBlobTrx starts a block and an EIP-4844 blob (type 3) transaction
+func (s *TracerTester) StartBlockBlobTrx() *TracerTester {
+	return s.startBlockTrxWithEvent(TestBlobTrx)
+}
+
+// StartBlockSetCodeTrx starts a block and an EIP-7702 set code (type 4) transaction
+func (s *TracerTester) StartBlockSetCodeTrx() *TracerTester {
+	return s.startBlockTrxWithEvent(TestSetCodeTrx)
+}
+
+// startBlockTrxWithEvent is the internal implementation for starting a block with a specific transaction
+func (s *TracerTester) startBlockTrxWithEvent(tx TxEvent) *TracerTester {
+	s.Tracer.OnBlockStart(TestBlock)
+	s.Tracer.OnTxStart(tx)
+
+	// Standard Ethereum transaction initialization hooks
+	from := tx.From
+
+	// 1. Nonce change: increment sender's nonce
+	s.Tracer.OnNonceChange(from, tx.Nonce, tx.Nonce+1)
+
+	// 2. Gas buy: sender pays upfront gas cost (gas * gasPrice)
+	gasCost := new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas), tx.GasPrice)
+	oldBalance := bigInt(1000000) // Assume sender has 1M wei
+	newBalance := new(big.Int).Sub(oldBalance, gasCost)
+	s.Tracer.OnBalanceChange(from, oldBalance, newBalance, pbeth.BalanceChange_REASON_GAS_BUY)
+
+	// 3. Gas initialization: set initial gas for transaction
+	s.Tracer.OnGasChange(0, tx.Gas, pbeth.GasChange_REASON_TX_INITIAL_BALANCE)
+
+	return s
+}
+
+// StartCallRaw begins a call context with explicit depth and parameters
+// Use this for nested calls or when you need full control over call depth
+func (s *TracerTester) StartCallRaw(depth int, typ byte, from, to [20]byte, input []byte, gas uint64, value *big.Int) *TracerTester {
+	s.Tracer.OnCallEnter(depth, typ, from, to, input, gas, value)
+	return s
+}
+
+func (s *TracerTester) StartRootCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(0, byte(CallTypeCall), from, to, input, gas, value)
+}
+
+func (s *TracerTester) StartRootCreateCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(0, byte(CallTypeCreate), from, to, input, gas, value)
+}
+
+func (s *TracerTester) StartCall(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(depth, byte(CallTypeCall), from, to, input, gas, value)
+}
+
+func (s *TracerTester) StartStaticCall(depth int, from, to [20]byte, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(depth, byte(CallTypeStaticCall), from, to, input, gas, nil)
+}
+
+func (s *TracerTester) StartCreateCall(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(depth, byte(CallTypeCreate), from, to, input, gas, value)
+}
+
+func (s *TracerTester) StartCreate2Call(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(depth, byte(CallTypeCreate2), from, to, input, gas, value)
+}
+
+func (s *TracerTester) StartDelegateCall(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(depth, byte(CallTypeDelegateCall), from, to, input, gas, value)
+}
+
+func (s *TracerTester) StartCallCode(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(depth, byte(CallTypeCallCode), from, to, input, gas, value)
+}
+
+// EndCall ends a call context
+func (s *TracerTester) EndCall(output []byte, gasUsed uint64, err error) *TracerTester {
+	s.Tracer.OnCallExit(output, gasUsed, err)
+	return s
+}
+
+// BalanceChange records a balance change
+func (s *TracerTester) BalanceChange(addr [20]byte, oldBalance, newBalance *big.Int, reason pbeth.BalanceChange_Reason) *TracerTester {
+	s.Tracer.OnBalanceChange(addr, oldBalance, newBalance, reason)
+	return s
+}
+
+// NonceChange records a nonce change
+func (s *TracerTester) NonceChange(addr [20]byte, oldNonce, newNonce uint64) *TracerTester {
+	s.Tracer.OnNonceChange(addr, oldNonce, newNonce)
+	return s
+}
+
+// CodeChange records a code change
+func (s *TracerTester) CodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]byte, oldCode, newCode []byte) *TracerTester {
+	s.Tracer.OnCodeChange(addr, prevCodeHash, newCodeHash, oldCode, newCode)
+	return s
+}
+
+// StorageChange records a storage change
+func (s *TracerTester) StorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) *TracerTester {
+	s.Tracer.OnStorageChange(addr, slot, oldValue, newValue)
+	return s
+}
+
+// GasChange records a gas change
+func (s *TracerTester) GasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) *TracerTester {
+	s.Tracer.OnGasChange(oldGas, newGas, reason)
+	return s
+}
+
+// Log records a log event
+func (s *TracerTester) Log(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) *TracerTester {
+	s.Tracer.OnLog(addr, topics, data, blockIndex)
+	return s
+}
+
+// EndBlockTrx ends the transaction and block with an optional error
+func (s *TracerTester) EndBlockTrx(receipt *ReceiptData, txErr, blockErr error) *TracerTester {
+	s.Tracer.OnTxEnd(receipt, txErr)
+	s.Tracer.OnBlockEnd(blockErr)
+	return s
+}
+
+func (s *TracerTester) EndBlock(err error) *TracerTester {
+	s.Tracer.OnBlockEnd(err)
+	return s
+}
+
+func (s *TracerTester) Validate(validateFunc func(block *pbeth.Block)) {
+	block := ParseFirehoseBlock(s.t, "shared tracer", s.Tracer.config.OutputWriter.(*bytes.Buffer))
+
+	require.NotNil(s.t, s.Tracer.nativeValidator, "native validator should be configured for testing")
+
+	nativeBlock := ParseFirehoseBlock(s.t, "native tracer", s.Tracer.nativeValidator.tracer.InternalTestingBuffer())
+
+	if !proto.Equal(block, nativeBlock) {
+		require.EqualExportedValues(s.t, nativeBlock, block)
+	}
+
+	validateFunc(block)
+}
+
+// ParseFirehoseBlock parses a block from FIRE BLOCK output format
+func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.Block {
+	scanner := bufio.NewScanner(buffer)
+
+	var initSeen bool
+	var block *pbeth.Block
+
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		// Skip empty lines
+		if len(line) == 0 {
+			continue
+		}
+
+		// Parse FIRE INIT
+		if strings.HasPrefix(line, "FIRE INIT ") {
+			parts := strings.SplitN(line, " ", 4)
+			require.GreaterOrEqual(t, len(parts), 4, "For %s: FIRE INIT line should have at least 4 parts", tag)
+
+			version := parts[2]
+			require.Contains(t, []string{"3.0", "3.1"}, version, "For %s: protocol version should be 3.0 or 3.1", tag)
+
+			initSeen = true
+			continue
+		}
+
+		// Parse FIRE BLOCK
+		if strings.HasPrefix(line, "FIRE BLOCK ") {
+			require.True(t, initSeen, "For %s: FIRE INIT must appear before FIRE BLOCK", tag)
+
+			// FIRE BLOCK <block_num> <block_hash> <parent_num> <parent_hash> <lib_num> <timestamp_unix_nano> <payload_base64>
+			parts := strings.SplitN(line, " ", 9)
+			require.GreaterOrEqual(t, len(parts), 9, "For %s: FIRE BLOCK line should have 9 parts", tag)
+
+			// Extract base64-encoded payload (last field)
+			payloadBase64 := parts[8]
+
+			// Decode base64
+			payloadBytes, err := base64.StdEncoding.DecodeString(payloadBase64)
+			require.NoError(t, err, "For %s: base64 payload decode", tag)
+
+			// Unmarshal protobuf
+			block = &pbeth.Block{}
+			err = proto.Unmarshal(payloadBytes, block)
+			require.NoError(t, err, "For %s: protobuf unmarshal", tag)
+
+			// Validate fields match (for integrity)
+			blockNum, err := strconv.ParseUint(parts[2], 10, 64)
+			require.NoError(t, err, "For %s: parse block number from FIRE BLOCK header", tag)
+			require.Equal(t, blockNum, block.Number, "For %s: block number in header should match protobuf", tag)
+
+			// We found the block, return it
+			return block
+		}
+	}
+
+	require.NoError(t, scanner.Err(), "For %s: reading buffer", tag)
+	require.Fail(t, "For %s: no FIRE BLOCK found in buffer", tag)
+	return nil
+}

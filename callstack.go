@@ -8,17 +8,35 @@ import (
 // It tracks the depth-based call tree and maintains parent-child relationships
 type CallStack struct {
 	stack []*pbeth.Call
+	index uint32 // Call index counter (starts at 0, first call gets index 1)
+	depth int    // Current call depth for tracking nested calls
 }
 
 // NewCallStack creates a new empty call stack
 func NewCallStack() *CallStack {
 	return &CallStack{
 		stack: make([]*pbeth.Call, 0, 32), // Pre-allocate for typical call depth
+		index: 0,
+		depth: 0,
 	}
 }
 
-// Push adds a new call to the stack
+// Push adds a new call to the stack and assigns Index, Depth, and ParentIndex
+// This matches the native Firehose tracer behavior
 func (cs *CallStack) Push(call *pbeth.Call) {
+	// Increment index first, so first call gets index 1
+	cs.index++
+	call.Index = cs.index
+
+	// Set depth from current stack depth
+	call.Depth = uint32(cs.depth)
+	cs.depth++
+
+	// If there's a parent call, set ParentIndex
+	if parent := cs.Peek(); parent != nil {
+		call.ParentIndex = parent.Index
+	}
+
 	cs.stack = append(cs.stack, call)
 }
 
@@ -31,6 +49,7 @@ func (cs *CallStack) Pop() *pbeth.Call {
 
 	call := cs.stack[len(cs.stack)-1]
 	cs.stack = cs.stack[:len(cs.stack)-1]
+	cs.depth--
 	return call
 }
 
@@ -53,9 +72,11 @@ func (cs *CallStack) Depth() int {
 	return len(cs.stack)
 }
 
-// Reset clears the call stack
+// Reset clears the call stack and resets counters
 func (cs *CallStack) Reset() {
 	cs.stack = cs.stack[:0]
+	cs.index = 0
+	cs.depth = 0
 }
 
 // Root returns the root call (bottom of stack) or nil if empty

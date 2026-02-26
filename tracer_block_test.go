@@ -9,12 +9,12 @@ import (
 
 type testCase struct {
 	Name     string
-	Scenario func(tt *testing.T) *TestBlockScenario
+	Scenario func(tt *testing.T) *TracerTester
 }
 
 func TestSimpleBlockTest(t *testing.T) {
 	t.Run("SimpleBlock_Builder", func(t *testing.T) {
-		NewBlockScenario(t).
+		NewTracerTester(t).
 			StartBlock().
 			EndBlock(nil).
 			Validate(func(block *pbeth.Block) {

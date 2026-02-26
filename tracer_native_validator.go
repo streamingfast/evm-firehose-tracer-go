@@ -11,20 +11,25 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
+	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 )
 
 type nativeValidator struct {
-	tracer *tracers.Firehose
-	t      *testing.T
+	stateDB *mockStateDB
+	tracer  *tracers.Firehose
+	t       *testing.T
 }
 
 // newNativeValidator creates a native validator with go-ethereum tracer
+// Backward compatibility is disabled to test against correct behavior
 func newNativeValidator(nativeJSONConfig string) (*nativeValidator, error) {
 	var nativeConfig json.RawMessage
 	if nativeJSONConfig == "" {
-		nativeConfig = json.RawMessage(`{"_private": {"flushToTestBuffer": true}}`)
+		// Disable backward compatibility for testing correct code paths
+		nativeConfig = json.RawMessage(`{"applyBackwardCompatibility": false, "_private": {"flushToTestBuffer": true}}`)
 	} else {
-		nativeConfig = json.RawMessage(`{` + nativeJSONConfig + `, "_private": {"flushToTestBuffer": true}}`)
+		nativeConfig = json.RawMessage(`{` + nativeJSONConfig + `, "applyBackwardCompatibility": false, "_private": {"flushToTestBuffer": true}}`)
 	}
 
 	nativeTracer, err := tracers.NewFirehoseFromRawJSON(nativeConfig)
@@ -33,7 +38,8 @@ func newNativeValidator(nativeJSONConfig string) (*nativeValidator, error) {
 	}
 
 	return &nativeValidator{
-		tracer: nativeTracer,
+		tracer:  nativeTracer,
+		stateDB: newMockStateDB(),
 	}, nil
 }
 
@@ -166,23 +172,29 @@ func (v *nativeValidator) OnBlockEnd(err error) {
 	v.tracer.OnBlockEnd(err)
 }
 
-func (v *nativeValidator) OnTxStart(tx interface{}, from [20]byte) {
+func (v *nativeValidator) OnTxStart(tx interface{}, from [20]byte) [32]byte {
 	if v == nil {
-		return
+		return [32]byte{}
 	}
 
 	txEvent, ok := tx.(TxEvent)
 	if !ok {
-		return
+		return [32]byte{}
 	}
 
 	nativeTx := convertToNativeTransaction(txEvent)
 	nativeFrom := common.Address(from)
 
-	// Create minimal VMContext for testing (StateDB not needed for non-contract-creation txs)
-	vmContext := &tracing.VMContext{}
+	// Pass minimal mock StateDB - the native tracer only needs it for
+	// getExecutedCode checks (GetNonce, GetCode, Exist methods)
+	vmContext := &tracing.VMContext{
+		StateDB: v.stateDB,
+	}
 
 	v.tracer.OnTxStart(vmContext, nativeTx, nativeFrom)
+
+	// Return the transaction hash computed by go-ethereum
+	return [32]byte(nativeTx.Hash())
 }
 
 func (v *nativeValidator) OnTxEnd(receipt interface{}, err error) {
@@ -204,8 +216,10 @@ func (v *nativeValidator) OnCallEnter(depth int, typ byte, from, to [20]byte, in
 		return
 	}
 
-	// TODO: Convert arrays to common.Address
-	// Call v.tracer.OnEnter(...)
+	nativeFrom := common.Address(from)
+	nativeTo := common.Address(to)
+
+	v.tracer.OnCallEnter(depth, typ, nativeFrom, nativeTo, input, gas, value)
 }
 
 func (v *nativeValidator) OnCallExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
@@ -221,8 +235,15 @@ func (v *nativeValidator) OnBalanceChange(addr [20]byte, prev, new *big.Int, rea
 		return
 	}
 
-	// TODO: Convert addr to common.Address and reason to native BalanceChangeReason
-	// Call v.tracer.OnBalanceChange(...)
+	pbReason, ok := reason.(pbeth.BalanceChange_Reason)
+	if !ok {
+		return
+	}
+
+	nativeAddr := common.Address(addr)
+	nativeReason := convertToNativeBalanceChangeReason(pbReason)
+
+	v.tracer.OnBalanceChange(nativeAddr, prev, new, nativeReason)
 }
 
 func (v *nativeValidator) OnNonceChange(addr [20]byte, prev, new uint64) {
@@ -230,8 +251,8 @@ func (v *nativeValidator) OnNonceChange(addr [20]byte, prev, new uint64) {
 		return
 	}
 
-	// TODO: Convert addr to common.Address
-	// Call v.tracer.OnNonceChange(...)
+	nativeAddr := common.Address(addr)
+	v.tracer.OnNonceChange(nativeAddr, prev, new)
 }
 
 func (v *nativeValidator) OnCodeChange(addr [20]byte, prevCodeHash, codeHash [32]byte, prevCode, code []byte) {
@@ -239,8 +260,11 @@ func (v *nativeValidator) OnCodeChange(addr [20]byte, prevCodeHash, codeHash [32
 		return
 	}
 
-	// TODO: Convert addr to common.Address and hashes to common.Hash
-	// Call v.tracer.OnCodeChange(...)
+	nativeAddr := common.Address(addr)
+	nativePrevHash := common.Hash(prevCodeHash)
+	nativeNewHash := common.Hash(codeHash)
+
+	v.tracer.OnCodeChange(nativeAddr, nativePrevHash, prevCode, nativeNewHash, code)
 }
 
 func (v *nativeValidator) OnStorageChange(addr [20]byte, slot, prev, new [32]byte) {
@@ -248,8 +272,12 @@ func (v *nativeValidator) OnStorageChange(addr [20]byte, slot, prev, new [32]byt
 		return
 	}
 
-	// TODO: Convert addr to common.Address and arrays to common.Hash
-	// Call v.tracer.OnStorageChange(...)
+	nativeAddr := common.Address(addr)
+	nativeSlot := common.Hash(slot)
+	nativePrev := common.Hash(prev)
+	nativeNew := common.Hash(new)
+
+	v.tracer.OnStorageChange(nativeAddr, nativeSlot, nativePrev, nativeNew)
 }
 
 func (v *nativeValidator) OnGasChange(old, new uint64, reason interface{}) {
@@ -257,17 +285,22 @@ func (v *nativeValidator) OnGasChange(old, new uint64, reason interface{}) {
 		return
 	}
 
-	// TODO: Convert reason to native GasChangeReason
-	// Call v.tracer.OnGasChange(...)
+	pbReason, ok := reason.(pbeth.GasChange_Reason)
+	if !ok {
+		return
+	}
+
+	nativeReason := convertToNativeGasChangeReason(pbReason)
+	v.tracer.OnGasChange(old, new, nativeReason)
 }
 
-func (v *nativeValidator) OnLog(log interface{}) {
+func (v *nativeValidator) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) {
 	if v == nil {
 		return
 	}
 
-	// TODO: Convert log to native types.Log
-	// Call v.tracer.OnLog(...)
+	nativeLog := convertToNativeLog(addr, topics, data, blockIndex)
+	v.tracer.OnLog(nativeLog)
 }
 
 // convertToNativeTransaction converts our TxEvent to go-ethereum's types.Transaction
@@ -278,21 +311,184 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 		to = &addr
 	}
 
-	// Create a LegacyTx for now (type 0)
-	// TODO: Handle other transaction types (AccessList, DynamicFee, Blob)
-	legacyTx := &types.LegacyTx{
-		Nonce:    event.Nonce,
-		GasPrice: event.GasPrice,
-		Gas:      event.Gas,
-		To:       to,
-		Value:    event.Value,
-		Data:     event.Input,
-		V:        new(big.Int),
-		R:        new(big.Int),
-		S:        new(big.Int),
+	// Convert based on transaction type
+	switch event.Type {
+	case 0: // Legacy
+		legacyTx := &types.LegacyTx{
+			Nonce:    event.Nonce,
+			GasPrice: event.GasPrice,
+			Gas:      event.Gas,
+			To:       to,
+			Value:    event.Value,
+			Data:     event.Input,
+			V:        new(big.Int),
+			R:        new(big.Int),
+			S:        new(big.Int),
+		}
+		return types.NewTx(legacyTx)
+
+	case 1: // EIP-2930 Access List
+		accessListTx := &types.AccessListTx{
+			ChainID:    big.NewInt(1),
+			Nonce:      event.Nonce,
+			GasPrice:   event.GasPrice,
+			Gas:        event.Gas,
+			To:         to,
+			Value:      event.Value,
+			Data:       event.Input,
+			AccessList: convertToNativeAccessList(event.AccessList),
+			V:          new(big.Int),
+			R:          new(big.Int),
+			S:          new(big.Int),
+		}
+		return types.NewTx(accessListTx)
+
+	case 2: // EIP-1559 Dynamic Fee
+		dynamicFeeTx := &types.DynamicFeeTx{
+			ChainID:    big.NewInt(1),
+			Nonce:      event.Nonce,
+			GasTipCap:  event.MaxPriorityFeePerGas,
+			GasFeeCap:  event.MaxFeePerGas,
+			Gas:        event.Gas,
+			To:         to,
+			Value:      event.Value,
+			Data:       event.Input,
+			AccessList: convertToNativeAccessList(event.AccessList),
+			V:          new(big.Int),
+			R:          new(big.Int),
+			S:          new(big.Int),
+		}
+		return types.NewTx(dynamicFeeTx)
+
+	case 3: // EIP-4844 Blob
+		blobTx := &types.BlobTx{
+			ChainID:    bigToUint256(big.NewInt(1)),
+			Nonce:      event.Nonce,
+			GasTipCap:  bigToUint256(event.MaxPriorityFeePerGas),
+			GasFeeCap:  bigToUint256(event.MaxFeePerGas),
+			Gas:        event.Gas,
+			To:         common.Address(*event.To),
+			Value:      bigToUint256(event.Value),
+			Data:       event.Input,
+			AccessList: convertToNativeAccessList(event.AccessList),
+			BlobFeeCap: bigToUint256(event.BlobGasFeeCap),
+			BlobHashes: convertToBlobHashes(event.BlobHashes),
+			V:          uint256.NewInt(0),
+			R:          uint256.NewInt(0),
+			S:          uint256.NewInt(0),
+		}
+		return types.NewTx(blobTx)
+
+	case 4: // EIP-7702 Set Code
+		setCodeTx := &types.SetCodeTx{
+			ChainID:    bigToUint256(big.NewInt(1)),
+			Nonce:      event.Nonce,
+			GasTipCap:  bigToUint256(event.MaxPriorityFeePerGas),
+			GasFeeCap:  bigToUint256(event.MaxFeePerGas),
+			Gas:        event.Gas,
+			To:         common.Address(*event.To),
+			Value:      bigToUint256(event.Value),
+			Data:       event.Input,
+			AccessList: convertToNativeAccessList(event.AccessList),
+			AuthList:   convertToNativeAuthList(event.SetCodeAuthorizations),
+			V:          uint256.NewInt(0),
+			R:          uint256.NewInt(0),
+			S:          uint256.NewInt(0),
+		}
+		return types.NewTx(setCodeTx)
+
+	default:
+		// Fallback to legacy for unknown types
+		legacyTx := &types.LegacyTx{
+			Nonce:    event.Nonce,
+			GasPrice: event.GasPrice,
+			Gas:      event.Gas,
+			To:       to,
+			Value:    event.Value,
+			Data:     event.Input,
+			V:        new(big.Int),
+			R:        new(big.Int),
+			S:        new(big.Int),
+		}
+		return types.NewTx(legacyTx)
+	}
+}
+
+// convertToNativeAccessList converts our AccessList to go-ethereum's types.AccessList
+func convertToNativeAccessList(accessList AccessList) types.AccessList {
+	if len(accessList) == 0 {
+		return nil
 	}
 
-	return types.NewTx(legacyTx)
+	nativeAccessList := make(types.AccessList, len(accessList))
+	for i, tuple := range accessList {
+		nativeTuple := types.AccessTuple{
+			Address: common.Address(tuple.Address),
+		}
+		if len(tuple.StorageKeys) > 0 {
+			nativeTuple.StorageKeys = make([]common.Hash, len(tuple.StorageKeys))
+			for j, key := range tuple.StorageKeys {
+				nativeTuple.StorageKeys[j] = common.Hash(key)
+			}
+		}
+		nativeAccessList[i] = nativeTuple
+	}
+	return nativeAccessList
+}
+
+// convertToNativeAuthList converts our SetCodeAuthorizations to go-ethereum's types.SetCodeAuthorization
+func convertToNativeAuthList(authList []SetCodeAuthorization) []types.SetCodeAuthorization {
+	if len(authList) == 0 {
+		return nil
+	}
+
+	nativeAuthList := make([]types.SetCodeAuthorization, len(authList))
+	for i, auth := range authList {
+		// Convert ChainID from [32]byte to uint256.Int
+		chainID := uint256.NewInt(0)
+		chainID.SetBytes(auth.ChainID[:])
+
+		// Convert R and S from [32]byte to uint256.Int
+		r := uint256.NewInt(0)
+		r.SetBytes(auth.R[:])
+
+		s := uint256.NewInt(0)
+		s.SetBytes(auth.S[:])
+
+		nativeAuthList[i] = types.SetCodeAuthorization{
+			ChainID: *chainID,
+			Address: common.Address(auth.Address),
+			Nonce:   auth.Nonce,
+			V:       uint8(auth.V), // Convert uint32 to uint8
+			R:       *r,
+			S:       *s,
+		}
+	}
+	return nativeAuthList
+}
+
+// bigToUint256 converts a *big.Int to *uint256.Int
+func bigToUint256(b *big.Int) *uint256.Int {
+	if b == nil {
+		return uint256.NewInt(0)
+	}
+	val, overflow := uint256.FromBig(b)
+	if overflow {
+		return uint256.NewInt(0)
+	}
+	return val
+}
+
+// convertToBlobHashes converts [][32]byte to []common.Hash
+func convertToBlobHashes(hashes [][32]byte) []common.Hash {
+	if len(hashes) == 0 {
+		return nil
+	}
+	blobHashes := make([]common.Hash, len(hashes))
+	for i, hash := range hashes {
+		blobHashes[i] = common.Hash(hash)
+	}
+	return blobHashes
 }
 
 // convertToNativeReceipt converts our ReceiptData to go-ethereum's types.Receipt
@@ -330,3 +526,142 @@ func convertToNativeReceipt(data *ReceiptData) *types.Receipt {
 		TransactionIndex:  uint(data.TransactionIndex),
 	}
 }
+
+// convertToNativeBalanceChangeReason converts protobuf balance change reason to go-ethereum tracing reason
+// This is the reverse mapping of balanceChangeReasonToPb in go-ethereum/eth/tracers/firehose.go
+func convertToNativeBalanceChangeReason(pbReason pbeth.BalanceChange_Reason) tracing.BalanceChangeReason {
+	switch pbReason {
+	case pbeth.BalanceChange_REASON_REWARD_MINE_UNCLE:
+		return tracing.BalanceIncreaseRewardMineUncle
+	case pbeth.BalanceChange_REASON_REWARD_MINE_BLOCK:
+		return tracing.BalanceIncreaseRewardMineBlock
+	case pbeth.BalanceChange_REASON_DAO_REFUND_CONTRACT:
+		return tracing.BalanceIncreaseDaoContract
+	case pbeth.BalanceChange_REASON_DAO_ADJUST_BALANCE:
+		return tracing.BalanceDecreaseDaoAccount
+	case pbeth.BalanceChange_REASON_TRANSFER:
+		return tracing.BalanceChangeTransfer
+	case pbeth.BalanceChange_REASON_GENESIS_BALANCE:
+		return tracing.BalanceIncreaseGenesisBalance
+	case pbeth.BalanceChange_REASON_GAS_BUY:
+		return tracing.BalanceDecreaseGasBuy
+	case pbeth.BalanceChange_REASON_REWARD_TRANSACTION_FEE:
+		return tracing.BalanceIncreaseRewardTransactionFee
+	case pbeth.BalanceChange_REASON_GAS_REFUND:
+		return tracing.BalanceIncreaseGasReturn
+	case pbeth.BalanceChange_REASON_TOUCH_ACCOUNT:
+		return tracing.BalanceChangeTouchAccount
+	case pbeth.BalanceChange_REASON_SUICIDE_REFUND:
+		return tracing.BalanceIncreaseSelfdestruct
+	case pbeth.BalanceChange_REASON_SUICIDE_WITHDRAW:
+		return tracing.BalanceDecreaseSelfdestruct
+	case pbeth.BalanceChange_REASON_BURN:
+		return tracing.BalanceDecreaseSelfdestructBurn
+	case pbeth.BalanceChange_REASON_WITHDRAWAL:
+		return tracing.BalanceIncreaseWithdrawal
+	default:
+		return tracing.BalanceChangeUnspecified
+	}
+}
+
+// convertToNativeGasChangeReason converts protobuf gas change reason to go-ethereum tracing reason
+// This is the reverse mapping of gasChangeReasonToPb in go-ethereum/eth/tracers/firehose.go
+func convertToNativeGasChangeReason(pbReason pbeth.GasChange_Reason) tracing.GasChangeReason {
+	switch pbReason {
+	case pbeth.GasChange_REASON_TX_INITIAL_BALANCE:
+		return tracing.GasChangeTxInitialBalance
+	case pbeth.GasChange_REASON_TX_REFUNDS:
+		return tracing.GasChangeTxRefunds
+	case pbeth.GasChange_REASON_TX_LEFT_OVER_RETURNED:
+		return tracing.GasChangeTxLeftOverReturned
+	case pbeth.GasChange_REASON_CALL_INITIAL_BALANCE:
+		return tracing.GasChangeCallInitialBalance
+	case pbeth.GasChange_REASON_CALL_LEFT_OVER_RETURNED:
+		return tracing.GasChangeCallLeftOverReturned
+	case pbeth.GasChange_REASON_INTRINSIC_GAS:
+		return tracing.GasChangeTxIntrinsicGas
+	case pbeth.GasChange_REASON_CONTRACT_CREATION:
+		return tracing.GasChangeCallContractCreation
+	case pbeth.GasChange_REASON_CONTRACT_CREATION2:
+		return tracing.GasChangeCallContractCreation2
+	case pbeth.GasChange_REASON_CODE_STORAGE:
+		return tracing.GasChangeCallCodeStorage
+	case pbeth.GasChange_REASON_PRECOMPILED_CONTRACT:
+		return tracing.GasChangeCallPrecompiledContract
+	case pbeth.GasChange_REASON_STATE_COLD_ACCESS:
+		return tracing.GasChangeCallStorageColdAccess
+	case pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION:
+		return tracing.GasChangeCallLeftOverRefunded
+	case pbeth.GasChange_REASON_FAILED_EXECUTION:
+		return tracing.GasChangeCallFailedExecution
+	default:
+		return tracing.GasChangeUnspecified
+	}
+}
+
+// convertToNativeLog converts our log parameters to go-ethereum's types.Log
+func convertToNativeLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) *types.Log {
+	nativeTopics := make([]common.Hash, len(topics))
+	for i, topic := range topics {
+		nativeTopics[i] = common.Hash(topic)
+	}
+
+	return &types.Log{
+		Address: common.Address(addr),
+		Topics:  nativeTopics,
+		Data:    data,
+		Index:   uint(blockIndex),
+	}
+}
+
+// mockStateDB is a minimal StateDB stub for testing
+// It only implements the methods called by the native Firehose tracer (firehose.go)
+// The tracer primarily uses GetNonce, GetCode, and Exist for getExecutedCode checks
+// All other methods are no-op stubs since actual state is tracked via tracer hooks
+type mockStateDB struct{}
+
+func newMockStateDB() *mockStateDB {
+	return &mockStateDB{}
+}
+
+// Methods used by native firehose.go tracer
+func (s *mockStateDB) GetNonce(addr common.Address) uint64 {
+	return 0 // Stub: actual nonces tracked via OnNonceChange hooks
+}
+
+func (s *mockStateDB) GetCode(addr common.Address) []byte {
+	return nil // Stub: actual code tracked via OnCodeChange hooks
+}
+
+func (s *mockStateDB) Exist(addr common.Address) bool {
+	return true // Stub: assume all addresses exist for testing
+}
+
+// No-op stub implementations for StateDB interface methods
+// These are required by the interface but not used by the native firehose.go tracer
+func (s *mockStateDB) CreateAccount(addr common.Address)                                          {}
+func (s *mockStateDB) SubBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {}
+func (s *mockStateDB) AddBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {}
+func (s *mockStateDB) GetBalance(addr common.Address) *uint256.Int                               { return uint256.NewInt(0) }
+func (s *mockStateDB) GetState(addr common.Address, hash common.Hash) common.Hash                { return common.Hash{} }
+func (s *mockStateDB) GetTransientState(addr common.Address, hash common.Hash) common.Hash       { return common.Hash{} }
+func (s *mockStateDB) SetState(addr common.Address, key, value common.Hash)                      {}
+func (s *mockStateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash       { return common.Hash{} }
+func (s *mockStateDB) GetStorageRoot(addr common.Address) common.Hash                            { return common.Hash{} }
+func (s *mockStateDB) GetCodeSize(addr common.Address) int                                       { return 0 }
+func (s *mockStateDB) GetCodeHash(addr common.Address) common.Hash                               { return common.Hash{} }
+func (s *mockStateDB) AddRefund(uint64)                                                          {}
+func (s *mockStateDB) SubRefund(uint64)                                                          {}
+func (s *mockStateDB) GetRefund() uint64                                                         { return 0 }
+func (s *mockStateDB) HasSelfDestructed(addr common.Address) bool                                { return false }
+func (s *mockStateDB) SelfDestruct(addr common.Address)                                          {}
+func (s *mockStateDB) Selfdestruct6780(addr common.Address)                                      {}
+func (s *mockStateDB) AddLog(*types.Log)                                                         {}
+func (s *mockStateDB) AddPreimage(common.Hash, []byte)                                           {}
+func (s *mockStateDB) AddAddressToAccessList(addr common.Address)                                {}
+func (s *mockStateDB) AddSlotToAccessList(addr common.Address, slot common.Hash)                 {}
+func (s *mockStateDB) AddressInAccessList(addr common.Address) bool                              { return false }
+func (s *mockStateDB) SlotInAccessList(addr common.Address, slot common.Hash) (bool, bool)       { return false, false }
+func (s *mockStateDB) Prepare(rules params.Rules, sender, coinbase common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList) {}
+func (s *mockStateDB) Snapshot() int                                                             { return 0 }
+func (s *mockStateDB) RevertToSnapshot(int)                                                      {}

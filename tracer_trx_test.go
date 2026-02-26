@@ -9,9 +9,9 @@ import (
 
 func TestTracer_Transaction(t *testing.T) {
 	t.Run("Transaction/Simple", func(t *testing.T) {
-		NewBlockScenario(t).
+		NewTracerTester(t).
 			StartBlockTrx().
-			EndBlockTrx(&ReceiptData{Status: 1}, nil, nil).
+			EndBlockTrx(successReceipt(0), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, uint64(TestBlock.Block.Number), block.Number)
 			})

@@ -4,6 +4,15 @@ import (
 	"math/big"
 )
 
+// Transaction types
+const (
+	TxTypeLegacy     = 0 // Legacy transaction (pre-EIP-2718)
+	TxTypeAccessList = 1 // EIP-2930 access list transaction
+	TxTypeDynamicFee = 2 // EIP-1559 dynamic fee transaction
+	TxTypeBlob       = 3 // EIP-4844 blob transaction
+	TxTypeSetCode    = 4 // EIP-7702 set code transaction
+)
+
 // BlockEventBuilder provides a fluent API for building blocks
 type BlockEventBuilder struct {
 	number     uint64
@@ -99,14 +108,27 @@ func (b *BlockEventBuilder) Build() BlockEvent {
 
 // TxEventBuilder provides a fluent API for building transactions
 type TxEventBuilder struct {
-	hash     [32]byte
-	from     [20]byte
-	to       [20]byte
-	value    *big.Int
-	gas      uint64
-	gasPrice *big.Int
-	nonce    uint64
-	data     []byte
+	txType               uint8
+	hash                 [32]byte
+	from                 [20]byte
+	to                   [20]byte
+	value                *big.Int
+	gas                  uint64
+	gasPrice             *big.Int
+	nonce                uint64
+	data                 []byte
+	maxFeePerGas         *big.Int
+	maxPriorityFeePerGas *big.Int
+	accessList            AccessList
+	blobGasFeeCap         *big.Int
+	blobHashes            [][32]byte
+	setCodeAuthorizations []SetCodeAuthorization
+}
+
+// Type sets the transaction type
+func (t *TxEventBuilder) Type(txType uint8) *TxEventBuilder {
+	t.txType = txType
+	return t
 }
 
 // Hash sets the transaction hash
@@ -163,16 +185,59 @@ func (t *TxEventBuilder) Data(data []byte) *TxEventBuilder {
 	return t
 }
 
+// MaxFeePerGas sets the max fee per gas (EIP-1559)
+func (t *TxEventBuilder) MaxFeePerGas(maxFee *big.Int) *TxEventBuilder {
+	t.maxFeePerGas = maxFee
+	return t
+}
+
+// MaxPriorityFeePerGas sets the max priority fee per gas (EIP-1559)
+func (t *TxEventBuilder) MaxPriorityFeePerGas(maxPriorityFee *big.Int) *TxEventBuilder {
+	t.maxPriorityFeePerGas = maxPriorityFee
+	return t
+}
+
+// AccessList sets the access list (EIP-2930/EIP-1559)
+func (t *TxEventBuilder) AccessList(accessList AccessList) *TxEventBuilder {
+	t.accessList = accessList
+	return t
+}
+
+// BlobGasFeeCap sets the blob gas fee cap (EIP-4844)
+func (t *TxEventBuilder) BlobGasFeeCap(feeCap *big.Int) *TxEventBuilder {
+	t.blobGasFeeCap = feeCap
+	return t
+}
+
+// BlobHashes sets the blob hashes (EIP-4844)
+func (t *TxEventBuilder) BlobHashes(hashes [][32]byte) *TxEventBuilder {
+	t.blobHashes = hashes
+	return t
+}
+
+// SetCodeAuthorizations sets the set code authorization list (EIP-7702)
+func (t *TxEventBuilder) SetCodeAuthorizations(authList []SetCodeAuthorization) *TxEventBuilder {
+	t.setCodeAuthorizations = authList
+	return t
+}
+
 func (t *TxEventBuilder) Build() TxEvent {
 	return TxEvent{
-		Hash:     t.hash,
-		From:     t.from,
-		To:       &t.to,
-		Value:    t.value,
-		Gas:      t.gas,
-		GasPrice: t.gasPrice,
-		Nonce:    t.nonce,
-		Input:    t.data,
+		Type:                  t.txType,
+		Hash:                  t.hash,
+		From:                  t.from,
+		To:                    &t.to,
+		Value:                 t.value,
+		Gas:                   t.gas,
+		GasPrice:              t.gasPrice,
+		Nonce:                 t.nonce,
+		Input:                 t.data,
+		MaxFeePerGas:          t.maxFeePerGas,
+		MaxPriorityFeePerGas:  t.maxPriorityFeePerGas,
+		AccessList:            t.accessList,
+		BlobGasFeeCap:         t.blobGasFeeCap,
+		BlobHashes:            t.blobHashes,
+		SetCodeAuthorizations: t.setCodeAuthorizations,
 	}
 }
 
