@@ -36,6 +36,16 @@ func bigInt(n int64) *big.Int {
 	return big.NewInt(n)
 }
 
+// mustBigInt creates a big.Int from a string (for large values that don't fit in int64)
+func mustBigInt(s string) *big.Int {
+	n := new(big.Int)
+	n, ok := n.SetString(s, 10)
+	if !ok {
+		panic("invalid big int: " + s)
+	}
+	return n
+}
+
 // successReceipt creates a successful receipt (status 1) with the given gas used
 func successReceipt(gasUsed uint64) *ReceiptData {
 	return &ReceiptData{

@@ -209,14 +209,14 @@ func TestTracer_NestedCalls(t *testing.T) {
 				assert.Equal(t, AliceAddr[:], rootCall.Caller)
 				assert.Equal(t, BobAddr[:], rootCall.Address)
 				assert.Equal(t, uint32(0), rootCall.Depth)
-				assert.Equal(t, int32(-1), rootCall.ParentIndex, "Root call has no parent")
+				assert.Equal(t, uint32(0), rootCall.ParentIndex, "Root call has no parent")
 
 				nestedCall := trx.Calls[1]
 				assert.Equal(t, pbeth.CallType_CALL, nestedCall.CallType)
 				assert.Equal(t, BobAddr[:], nestedCall.Caller)
 				assert.Equal(t, CharlieAddr[:], nestedCall.Address)
 				assert.Equal(t, uint32(1), nestedCall.Depth)
-				assert.Equal(t, int32(0), nestedCall.ParentIndex, "Nested call parent is root")
+				assert.Equal(t, uint32(1), nestedCall.ParentIndex, "Nested call parent is root")
 			})
 	})
 
@@ -241,9 +241,9 @@ func TestTracer_NestedCalls(t *testing.T) {
 				}
 
 				// Verify parent relationships
-				assert.Equal(t, int32(-1), trx.Calls[0].ParentIndex)
-				assert.Equal(t, int32(0), trx.Calls[1].ParentIndex)
-				assert.Equal(t, int32(1), trx.Calls[2].ParentIndex)
+				assert.Equal(t, uint32(0), trx.Calls[0].ParentIndex) // Root has no parent
+				assert.Equal(t, uint32(1), trx.Calls[1].ParentIndex) // Child of call 1 (index=1)
+				assert.Equal(t, uint32(2), trx.Calls[2].ParentIndex) // Child of call 2 (index=2)
 			})
 	})
 
@@ -319,9 +319,9 @@ func TestTracer_NestedCalls(t *testing.T) {
 				firstSibling := trx.Calls[1]
 				secondSibling := trx.Calls[2]
 
-				// Both siblings should have same parent (root) and same depth
-				assert.Equal(t, int32(0), firstSibling.ParentIndex)
-				assert.Equal(t, int32(0), secondSibling.ParentIndex)
+				// Both siblings should have same parent (root=1) and same depth
+				assert.Equal(t, uint32(1), firstSibling.ParentIndex)
+				assert.Equal(t, uint32(1), secondSibling.ParentIndex)
 				assert.Equal(t, uint32(1), firstSibling.Depth)
 				assert.Equal(t, uint32(1), secondSibling.Depth)
 
@@ -384,9 +384,8 @@ func TestTracer_CallDataAndGas(t *testing.T) {
 				trx := block.TransactionTraces[0]
 				call := trx.Calls[0]
 
-				// Zero value should still be represented
-				assert.NotNil(t, call.Value)
-				assert.Equal(t, uint64(0), call.Value.Uint64())
+				// Zero value is represented as nil in protobuf (both tracers behave this way)
+				assert.Nil(t, call.Value)
 			})
 	})
 
