@@ -2,6 +2,7 @@ package firehose
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"hash"
@@ -13,9 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/crypto/sha3"
-
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
+	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -28,14 +28,14 @@ const ProtocolVersion = "3.0"
 // - Isolated mode: Used for parallel per-transaction tracing
 type Tracer struct {
 	// Global state
-	outputWriter             io.Writer
-	initSent                 *atomic.Bool
-	config                   *Config
-	chainConfig              *ChainConfig
-	hasher                   hash.Hash      // Keccak256 hasher instance (non-concurrent safe)
-	hasherBuf                [32]byte       // Keccak256 hasher result buffer (non-concurrent safe)
-	tracerID                 string
-	concurrentFlushQueue     *ConcurrentFlushQueue
+	outputWriter              io.Writer
+	initSent                  *atomic.Bool
+	config                    *Config
+	chainConfig               *ChainConfig
+	hasher                    hash.Hash // Keccak256 hasher instance (non-concurrent safe)
+	hasherBuf                 [32]byte  // Keccak256 hasher result buffer (non-concurrent safe)
+	tracerID                  string
+	concurrentFlushQueue      *ConcurrentFlushQueue
 	concurrentFlushBufferSize int
 
 	// Block state
@@ -43,7 +43,7 @@ type Tracer struct {
 	blockBaseFee                *big.Int
 	blockOrdinal                *Ordinal
 	blockFinality               *FinalityStatus
-	blockRules                  Rules  // Fork rules for current block (computed once per block)
+	blockRules                  Rules // Fork rules for current block (computed once per block)
 	blockIsPrecompiledAddr      func(addr [20]byte) bool
 	blockReorderOrdinal         bool
 	blockReorderOrdinalSnapshot uint64
@@ -54,8 +54,8 @@ type Tracer struct {
 	transaction          *pbeth.TransactionTrace
 	transactionLogIndex  uint32
 	inSystemCall         bool
-	transactionIsolated  bool  // true = isolated mode, false = coordinator mode
-	transactionTransient *pbeth.TransactionTrace  // Only used in isolated mode
+	transactionIsolated  bool                    // true = isolated mode, false = coordinator mode
+	transactionTransient *pbeth.TransactionTrace // Only used in isolated mode
 
 	// Call state
 	callStack               *CallStack
@@ -68,7 +68,7 @@ type Tracer struct {
 	// - Optimism/Katana: flashBlockIndex for flash block execution
 	// - Polygon: State sync receipt handling
 	// They remain zero/nil if the hooks are never called.
-	flashBlockIndex int  // Flash block index (Optimism/Katana)
+	flashBlockIndex int // Flash block index (Optimism/Katana)
 
 	// System calls tracking (used in some chains via OnSystemCallStart/End hooks)
 	systemCalls []*pbeth.Call
@@ -76,6 +76,12 @@ type Tracer struct {
 	// Testing state (only used in tests)
 	testingBuffer             *bytes.Buffer
 	testingIgnoreGenesisBlock bool
+
+	// Validation state (temporary - only used during validation phase)
+	// This field is nil unless validation mode is enabled via test framework.
+	// When non-nil, all tracer entrypoints also call the native tracer for comparison.
+	// This will be removed once validation is complete.
+	nativeValidator *nativeValidator
 }
 
 // NewTracer creates a new Firehose tracer with the given configuration.
@@ -109,6 +115,9 @@ func NewTracer(config *Config) *Tracer {
 		callStack:               NewCallStack(),
 		deferredCallState:       NewDeferredCallState(),
 		latestCallEnterSuicided: false,
+
+		// Validation state
+		nativeValidator: &nativeValidator{},
 	}
 
 	// Set up concurrent flushing if enabled
@@ -219,11 +228,18 @@ func (t *Tracer) printBlockToFirehose(block *pbeth.Block) ([]byte, error) {
 	}
 
 	// Encode as base64 for Firehose protocol
-	encoded := make([]byte, hex.EncodedLen(len(marshalled)))
-	hex.Encode(encoded, marshalled)
+	encoded := base64.StdEncoding.EncodeToString(marshalled)
 
-	// Format: "BLOCK <block_num> <hex_encoded_block>"
-	line := fmt.Sprintf("BLOCK %d %s\n", block.Number, encoded)
+	// Format: "FIRE BLOCK <block_num> <block_hash> <parent_num> <parent_hash> <lib_num> <timestamp> <payload>"
+	blockHash := hex.EncodeToString(block.Hash)
+	parentHash := hex.EncodeToString(block.Header.ParentHash)
+	line := fmt.Sprintf("FIRE BLOCK %d %s %d %s 0 %d %s\n",
+		block.Number,
+		blockHash,
+		block.Number-1, // parent number
+		parentHash,
+		block.Header.Timestamp.AsTime().UnixNano(),
+		encoded)
 	return []byte(line), nil
 }
 
@@ -232,148 +248,35 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
+// bigIntToProtobuf converts a big.Int to protobuf BigInt
+// Matches the semantics of firehoseBigIntFromNative in go-ethereum:
+// - Returns nil for both nil and zero values
+// - Only non-zero values get encoded
+func bigIntToProtobuf(i *big.Int) *pbeth.BigInt {
+	if i == nil || i.Sign() == 0 {
+		return nil
+	}
+	return &pbeth.BigInt{Bytes: i.Bytes()}
+}
+
 // ============================================================================
 // Hook Parameter Types
 // ============================================================================
 // These types define the minimal data needed for each hook method.
 // Chain-specific implementations will convert from go-ethereum types to these.
 
-// BlockEvent contains the data needed for OnBlockStart
-type BlockEvent struct {
-	Block     BlockData
-	Finalized *FinalizedBlockRef
-
-	// Precompile Detection (at least one should be provided by chain implementation)
-	// The chain implementation should provide precompile information since it varies by:
-	// - Chain type (Ethereum, BSC, Polygon, etc.)
-	// - Fork rules (Istanbul adds blake2f, Cancun adds point evaluation, etc.)
-	// - Custom chain precompiles
-	//
-	// Option 1: Provide a pre-built checker function
-	IsPrecompiledAddr func(addr [20]byte) bool
-	//
-	// Option 2: Provide the list of addresses (tracer will build the checker)
-	ActivePrecompiles [][20]byte
-	//
-	// If neither is provided, all addresses will be treated as non-precompiled.
-	//
-	// Example for go-ethereum integration:
-	//   import "github.com/ethereum/go-ethereum/core/vm"
-	//   activePrecompiles := vm.ActivePrecompiles(blockRules)
-	//   event.ActivePrecompiles = make([][20]byte, len(activePrecompiles))
-	//   for i, addr := range activePrecompiles {
-	//       event.ActivePrecompiles[i] = addr
-	//   }
-}
-
-// BlockData contains the minimal block data needed by the tracer
-type BlockData struct {
-	Number       uint64
-	Hash         [32]byte
-	ParentHash   [32]byte
-	UncleHash    [32]byte
-	Coinbase     [20]byte
-	Root         [32]byte
-	TxHash       [32]byte
-	ReceiptHash  [32]byte
-	Bloom        []byte // 256 bytes
-	Difficulty   *big.Int
-	GasLimit     uint64
-	GasUsed      uint64
-	Time         uint64
-	Extra        []byte
-	MixDigest    [32]byte
-	Nonce        uint64
-	BaseFee      *big.Int
-	Uncles       []UncleData
-	Size         uint64
-	Withdrawals  []WithdrawalData
-	IsMerge      bool
-}
-
-// UncleData contains uncle block header data
-type UncleData struct {
-	Hash         [32]byte
-	ParentHash   [32]byte
-	UncleHash    [32]byte
-	Coinbase     [20]byte
-	Root         [32]byte
-	TxHash       [32]byte
-	ReceiptHash  [32]byte
-	Bloom        []byte
-	Difficulty   *big.Int
-	Number       uint64
-	GasLimit     uint64
-	GasUsed      uint64
-	Time         uint64
-	Extra        []byte
-	MixDigest    [32]byte
-	Nonce        uint64
-	BaseFee      *big.Int
-}
-
-// WithdrawalData contains withdrawal data
-type WithdrawalData struct {
-	Index          uint64
-	ValidatorIndex uint64
-	Address        [20]byte
-	Amount         uint64
-}
-
-// FinalizedBlockRef contains information about the finalized block
-type FinalizedBlockRef struct {
-	Number uint64
-	Hash   [32]byte
-}
-
-// TxEvent contains the data needed for OnTxStart
-type TxEvent struct {
-	Type     uint8
-	Hash     [32]byte
-	From     [20]byte
-	To       *[20]byte  // nil for contract creation
-	Input    []byte
-	Value    *big.Int
-	Gas      uint64
-	GasPrice *big.Int
-	Nonce    uint64
-	Index    uint32
-}
-
-// CallFrame contains the data for OnCallEnter/OnCallExit
-type CallFrame struct {
-	Type    CallType
-	From    [20]byte
-	To      [20]byte
-	Input   []byte
-	Gas     uint64
-	Value   *big.Int
-	CodeAddress *[20]byte  // For DELEGATECALL
-}
-
-// CallType represents the type of call
-type CallType int
-
-const (
-	CallTypeCall CallType = iota
-	CallTypeCallCode
-	CallTypeDelegateCall
-	CallTypeStaticCall
-	CallTypeCreate
-	CallTypeCreate2
-	CallTypeSelfDestruct
-)
-
 // ============================================================================
 // Lifecycle Hooks
 // ============================================================================
 
 // OnBlockchainInit is called once when the blockchain is initialized
-func (t *Tracer) OnBlockchainInit(chainConfig *ChainConfig) {
+func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConfig *ChainConfig) {
+	t.nativeValidator.OnBlockchainInit(chainConfig)
+
 	t.chainConfig = chainConfig
 
 	if wasNeverSent := t.initSent.CompareAndSwap(false, true); wasNeverSent {
-		t.printToFirehose("INIT", ProtocolVersion, "firehose-tracer", "1.0.0")
+		t.printToFirehose("FIRE INIT", ProtocolVersion, "firehose-evm-tracer/"+nodeName, nodeVersion)
 	} else {
 		panic("OnBlockchainInit was called more than once")
 	}
@@ -398,6 +301,8 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent) {
 
 // OnBlockStart is called at the beginning of block processing
 func (t *Tracer) OnBlockStart(event BlockEvent) {
+	t.nativeValidator.OnBlockStart(event)
+
 	block := event.Block
 
 	// Compute block rules for this block (block-scoped fork flags)
@@ -420,7 +325,7 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 		Hash:   block.Hash[:],
 		Number: block.Number,
 		Header: t.newBlockHeaderFromBlockData(block),
-		Ver:    4,
+		Ver:    3,
 		Size:   block.Size,
 	}
 
@@ -455,6 +360,8 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 
 // OnBlockEnd is called at the end of block processing
 func (t *Tracer) OnBlockEnd(err error) {
+	t.nativeValidator.OnBlockEnd(err)
+
 	firehoseInfo("block ending (err=%v)", err)
 
 	if err == nil {
@@ -500,27 +407,32 @@ func (t *Tracer) OnClose() {
 
 func (t *Tracer) newBlockHeaderFromBlockData(block BlockData) *pbeth.BlockHeader {
 	header := &pbeth.BlockHeader{
-		ParentHash:  block.ParentHash[:],
-		UncleHash:   block.UncleHash[:],
-		Coinbase:    block.Coinbase[:],
-		StateRoot:   block.Root[:],
+		ParentHash:       block.ParentHash[:],
+		UncleHash:        block.UncleHash[:],
+		Coinbase:         block.Coinbase[:],
+		StateRoot:        block.Root[:],
 		TransactionsRoot: block.TxHash[:],
-		ReceiptRoot: block.ReceiptHash[:],
-		LogsBloom:   block.Bloom,
-		Difficulty:  &pbeth.BigInt{Bytes: block.Difficulty.Bytes()},
-		TotalDifficulty: &pbeth.BigInt{Bytes: block.Difficulty.Bytes()}, // FIXME: Need actual total difficulty
-		Number:      block.Number,
-		GasLimit:    block.GasLimit,
-		GasUsed:     block.GasUsed,
-		Timestamp:   timestamppb.New(toTime(block.Time)),
-		ExtraData:   block.Extra,
-		MixHash:     block.MixDigest[:],
-		Nonce:       block.Nonce,
-		Hash:        block.Hash[:],
+		ReceiptRoot:      block.ReceiptHash[:],
+		LogsBloom:        block.Bloom,
+		Difficulty:       bigIntToProtobuf(block.Difficulty),
+		TotalDifficulty:  nil, // Set to nil for PoS blocks (will be properly implemented later)
+		Number:           block.Number,
+		GasLimit:         block.GasLimit,
+		GasUsed:          block.GasUsed,
+		Timestamp:        timestamppb.New(toTime(block.Time)),
+		ExtraData:        block.Extra,
+		MixHash:          block.MixDigest[:],
+		Nonce:            block.Nonce,
+		Hash:             block.Hash[:],
 	}
 
-	if block.BaseFee != nil {
-		header.BaseFeePerGas = &pbeth.BigInt{Bytes: block.BaseFee.Bytes()}
+	// BaseFee uses the same conversion as other BigInt fields
+	header.BaseFeePerGas = bigIntToProtobuf(block.BaseFee)
+
+	// Special case: Difficulty must always be set, even for PoS (zero difficulty)
+	// This matches the native tracer's behavior in firehose.go:2089-2091
+	if header.Difficulty == nil {
+		header.Difficulty = &pbeth.BigInt{Bytes: []byte{0}}
 	}
 
 	return header
@@ -528,27 +440,32 @@ func (t *Tracer) newBlockHeaderFromBlockData(block BlockData) *pbeth.BlockHeader
 
 func (t *Tracer) newBlockHeaderFromUncleData(uncle UncleData) *pbeth.BlockHeader {
 	header := &pbeth.BlockHeader{
-		ParentHash:  uncle.ParentHash[:],
-		UncleHash:   uncle.UncleHash[:],
-		Coinbase:    uncle.Coinbase[:],
-		StateRoot:   uncle.Root[:],
+		ParentHash:       uncle.ParentHash[:],
+		UncleHash:        uncle.UncleHash[:],
+		Coinbase:         uncle.Coinbase[:],
+		StateRoot:        uncle.Root[:],
 		TransactionsRoot: uncle.TxHash[:],
-		ReceiptRoot: uncle.ReceiptHash[:],
-		LogsBloom:   uncle.Bloom,
-		Difficulty:  &pbeth.BigInt{Bytes: uncle.Difficulty.Bytes()},
-		TotalDifficulty: &pbeth.BigInt{Bytes: uncle.Difficulty.Bytes()},
-		Number:      uncle.Number,
-		GasLimit:    uncle.GasLimit,
-		GasUsed:     uncle.GasUsed,
-		Timestamp:   timestamppb.New(toTime(uncle.Time)),
-		ExtraData:   uncle.Extra,
-		MixHash:     uncle.MixDigest[:],
-		Nonce:       uncle.Nonce,
-		Hash:        uncle.Hash[:],
+		ReceiptRoot:      uncle.ReceiptHash[:],
+		LogsBloom:        uncle.Bloom,
+		Difficulty:       bigIntToProtobuf(uncle.Difficulty),
+		TotalDifficulty:  nil, // Set to nil for consistency
+		Number:           uncle.Number,
+		GasLimit:         uncle.GasLimit,
+		GasUsed:          uncle.GasUsed,
+		Timestamp:        timestamppb.New(toTime(uncle.Time)),
+		ExtraData:        uncle.Extra,
+		MixHash:          uncle.MixDigest[:],
+		Nonce:            uncle.Nonce,
+		Hash:             uncle.Hash[:],
 	}
 
-	if uncle.BaseFee != nil {
-		header.BaseFeePerGas = &pbeth.BigInt{Bytes: uncle.BaseFee.Bytes()}
+	// BaseFee uses the same conversion as other BigInt fields
+	header.BaseFeePerGas = bigIntToProtobuf(uncle.BaseFee)
+
+	// Special case: Difficulty must always be set, even for PoS (zero difficulty)
+	// This matches the native tracer's behavior in firehose.go:2089-2091
+	if header.Difficulty == nil {
+		header.Difficulty = &pbeth.BigInt{Bytes: []byte{0}}
 	}
 
 	return header
@@ -583,6 +500,8 @@ func (t *Tracer) reorderIsolatedTransactionsAndOrdinals() {
 
 // OnTxStart is called at the beginning of transaction execution
 func (t *Tracer) OnTxStart(event TxEvent) {
+	t.nativeValidator.OnTxStart(event, event.From)
+
 	firehoseInfo("trx start (hash=%x type=%d gas=%d isolated=%t)", event.Hash, event.Type, event.Gas, t.transactionIsolated)
 
 	// Create transaction trace
@@ -592,8 +511,8 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 		From:         event.From[:],
 		Nonce:        event.Nonce,
 		GasLimit:     event.Gas,
-		GasPrice:     &pbeth.BigInt{Bytes: event.GasPrice.Bytes()},
-		Value:        &pbeth.BigInt{Bytes: event.Value.Bytes()},
+		GasPrice:     bigIntToProtobuf(event.GasPrice),
+		Value:        bigIntToProtobuf(event.Value),
 		Input:        event.Input,
 		Type:         pbeth.TransactionTrace_Type(event.Type),
 	}
@@ -608,6 +527,8 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 
 // OnTxEnd is called at the end of transaction execution
 func (t *Tracer) OnTxEnd(receipt *ReceiptData, err error) {
+	t.nativeValidator.OnTxEnd(receipt, err)
+
 	firehoseInfo("trx ending (isolated=%t, err=%v)", t.transactionIsolated, err)
 
 	trxTrace := t.completeTransaction(receipt, err)
@@ -671,10 +592,10 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 
 // ReceiptData contains the minimal receipt data needed
 type ReceiptData struct {
-	TransactionIndex uint32
-	GasUsed          uint64
-	Status           uint64
-	Logs             []LogData
+	TransactionIndex  uint32
+	GasUsed           uint64
+	Status            uint64
+	Logs              []LogData
 	CumulativeGasUsed uint64
 }
 
@@ -728,6 +649,8 @@ func (t *Tracer) markStateReverted(call *pbeth.Call) {
 // OnCallEnter is called when entering a call
 func (t *Tracer) OnCallEnter(frame CallFrame) {
 	depth := t.callStack.Depth()
+	t.nativeValidator.OnCallEnter(depth, byte(frame.Type), frame.From, frame.To, frame.Input, frame.Gas, frame.Value)
+
 	firehoseTrace("call enter (depth=%d type=%d from=%s to=%s value=%d gas=%d input=%s)",
 		depth, frame.Type, shortAddressView(&frame.From), shortAddressView(&frame.To),
 		frame.Value, frame.Gas, inputView(frame.Input))
@@ -769,6 +692,10 @@ func (t *Tracer) OnCallExit(output []byte, gasUsed uint64, err error) {
 		return
 	}
 
+	depth := t.callStack.Depth() - 1 // -1 because we haven't popped yet
+	reverted := err != nil
+	t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
+
 	firehoseTrace("call exit (depth=%d gas_used=%d err=%s output=%s)",
 		call.Depth, gasUsed, errorView(err), outputView(output))
 
@@ -798,9 +725,9 @@ func (t *Tracer) callTypeToProto(ct CallType) pbeth.CallType {
 	case CallTypeCreate:
 		return pbeth.CallType_CREATE
 	case CallTypeCreate2:
-		return pbeth.CallType_CREATE  // CREATE2 may not be in protobuf, use CREATE
+		return pbeth.CallType_CREATE // CREATE2 may not be in protobuf, use CREATE
 	case CallTypeSelfDestruct:
-		return pbeth.CallType_UNSPECIFIED  // SELFDESTRUCT may not be a call type
+		return pbeth.CallType_UNSPECIFIED // SELFDESTRUCT may not be a call type
 	default:
 		return pbeth.CallType_UNSPECIFIED
 	}
@@ -813,6 +740,8 @@ func (t *Tracer) callTypeToProto(ct CallType) pbeth.CallType {
 // OnBalanceChange is called when an account balance changes
 // Note: reason is pbeth.BalanceChange_Reason - the chain implementation converts from go-ethereum types
 func (t *Tracer) OnBalanceChange(addr [20]byte, oldBalance, newBalance *big.Int, reason pbeth.BalanceChange_Reason) {
+	t.nativeValidator.OnBalanceChange(addr, oldBalance, newBalance, reason)
+
 	// Ignore unspecified reasons
 	if reason == pbeth.BalanceChange_REASON_UNKNOWN {
 		return
@@ -858,6 +787,8 @@ func (t *Tracer) newBalanceChange(tag string, addr [20]byte, oldValue, newValue 
 
 // OnNonceChange is called when an account nonce changes
 func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
+	t.nativeValidator.OnNonceChange(addr, oldNonce, newNonce)
+
 	t.ensureInBlockAndInTrx()
 
 	activeCall := t.callStack.Peek()
@@ -880,6 +811,8 @@ func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
 // OnCodeChange is called when contract code changes
 // Note: Includes code hashes for proper tracking
 func (t *Tracer) OnCodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]byte, oldCode, newCode []byte) {
+	t.nativeValidator.OnCodeChange(addr, prevCodeHash, newCodeHash, oldCode, newCode)
+
 	firehoseDebug("code changed (address=%s prev_hash=%x new_hash=%x)",
 		shortAddressView(&addr), prevCodeHash, newCodeHash)
 
@@ -924,6 +857,8 @@ func (t *Tracer) newCodeChange(addr [20]byte, prevCodeHash [32]byte, oldCode []b
 
 // OnStorageChange is called when contract storage changes
 func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) {
+	t.nativeValidator.OnStorageChange(addr, slot, oldValue, newValue)
+
 	firehoseTrace("storage changed (address=%s key=%x, before=%x after=%x)",
 		shortAddressView(&addr), slot, oldValue, newValue)
 
@@ -946,6 +881,8 @@ func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byt
 // OnLog is called when a log event is emitted
 // Note: blockIndex comes from the log itself (from go-ethereum types.Log.Index)
 func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) {
+	t.nativeValidator.OnLog(nil)
+
 	t.ensureInBlockAndInTrxAndInCall()
 
 	activeCall := t.callStack.Peek()
@@ -971,6 +908,8 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 // OnGasChange is called when gas is consumed
 // Note: reason is pbeth.GasChange_Reason - the chain implementation converts from go-ethereum types
 func (t *Tracer) OnGasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) {
+	t.nativeValidator.OnGasChange(oldGas, newGas, reason)
+
 	t.ensureInBlockAndInTrx()
 
 	// No change in gas - ignore
@@ -1051,10 +990,10 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScop
 
 // OpcodeScopeData contains the execution scope for an opcode
 type OpcodeScopeData struct {
-	Memory    []byte
-	Stack     [][]byte
-	Contract  []byte
-	CodeAddr  [20]byte
+	Memory   []byte
+	Stack    [][]byte
+	Contract []byte
+	CodeAddr [20]byte
 }
 
 // OnKeccakPreimage is called when a keccak256 preimage is available
