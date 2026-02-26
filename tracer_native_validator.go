@@ -303,6 +303,33 @@ func (v *nativeValidator) OnLog(addr [20]byte, topics [][32]byte, data []byte, b
 	v.tracer.OnLog(nativeLog)
 }
 
+func (v *nativeValidator) OnOpcode(pc uint64, op byte, gas, cost uint64, depth int) {
+	if v == nil {
+		return
+	}
+
+	// Call native tracer's OnOpcode with minimal parameters
+	// The scope and rData parameters are only used for some opcodes (like KECCAK256),
+	// for SELFDESTRUCT we only need the opcode byte
+	v.tracer.OnOpcode(pc, op, gas, cost, nil, nil, depth, nil)
+}
+
+func (v *nativeValidator) OnSystemCallStart() {
+	if v == nil {
+		return
+	}
+
+	v.tracer.OnSystemCallStart()
+}
+
+func (v *nativeValidator) OnSystemCallEnd() {
+	if v == nil {
+		return
+	}
+
+	v.tracer.OnSystemCallEnd()
+}
+
 // convertToNativeTransaction converts our TxEvent to go-ethereum's types.Transaction
 func convertToNativeTransaction(event TxEvent) *types.Transaction {
 	var to *common.Address

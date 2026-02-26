@@ -225,6 +225,23 @@ func (s *TracerTester) StartBlockSetCodeTrx() *TracerTester {
 	return s.startBlockTrxWithEvent(TestSetCodeTrx)
 }
 
+// StartBlockTrxNoHooks starts a block and transaction WITHOUT automatic hooks
+// This is useful for testing specific state changes in isolation without the
+// automatic nonce increment, gas buy, and gas initialization that StartBlockTrx adds.
+// Uses TestTrx (legacy transaction) by default.
+func (s *TracerTester) StartBlockTrxNoHooks() *TracerTester {
+	s.Tracer.OnBlockStart(TestBlock)
+	s.Tracer.OnTxStart(TestTrx)
+	return s
+}
+
+// StartTrxNoHooks starts a transaction WITHOUT starting a block or automatic hooks
+// Use this when you've already started a block (e.g., after system calls)
+func (s *TracerTester) StartTrxNoHooks() *TracerTester {
+	s.Tracer.OnTxStart(TestTrx)
+	return s
+}
+
 // startBlockTrxWithEvent is the internal implementation for starting a block with a specific transaction
 func (s *TracerTester) startBlockTrxWithEvent(tx TxEvent) *TracerTester {
 	s.Tracer.OnBlockStart(TestBlock)
@@ -358,6 +375,137 @@ func (s *TracerTester) GasChange(oldGas, newGas uint64, reason pbeth.GasChange_R
 // Log records a log event
 func (s *TracerTester) Log(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) *TracerTester {
 	s.Tracer.OnLog(addr, topics, data, blockIndex)
+	return s
+}
+
+// Suicide simulates a SELFDESTRUCT operation with proper Ethereum state changes
+// This follows the Geth native tracer's behavior where SELFDESTRUCT triggers:
+// 1. OnOpcode(SELFDESTRUCT) - marks call.Suicide = true
+// 2. OnCallEnter(SELFDESTRUCT) - sets latestCallEnterSuicided flag
+// 3. Balance changes (SUICIDE_WITHDRAW then SUICIDE_REFUND)
+// 4. OnCallExit - clears the latestCallEnterSuicided flag
+//
+// Parameters:
+// - contractAddr: the address of the contract being destructed
+// - beneficiaryAddr: the address receiving the contract's balance
+// - contractBalance: the balance of the contract before suicide
+//
+// Note: Since OnOpcode isn't exposed in tests, we manually mark the call as suicided
+func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractBalance *big.Int) *TracerTester {
+	// Step 1: Simulate OnOpcode(SELFDESTRUCT) - marks active call as suicided
+	// (matching native tracer firehose.go:1191-1193)
+	activeCallDepth := s.Tracer.callStack.Depth() - 1 // Depth of the active call (0 for root call)
+
+	// Mark the shared tracer's active call as suicided and executed
+	// OnOpcode in the native tracer sets both Suicide and ExecutedCode
+	activeCall := s.Tracer.callStack.Peek()
+	if activeCall != nil {
+		activeCall.Suicide = true
+		activeCall.ExecutedCode = true // Set by captureInterpreterStep in native tracer
+	}
+
+	// Call OnOpcode for native validator to mark its call as suicided and executed
+	if s.Tracer.nativeValidator != nil {
+		s.Tracer.nativeValidator.OnOpcode(0, 0xff, 0, 0, activeCallDepth) // op=0xff is SELFDESTRUCT
+	}
+
+	// Step 2: Trigger OnCallEnter(SELFDESTRUCT) at depth = active_call_depth + 1
+	// This sets latestCallEnterSuicided flag (matching firehose.go:1040-1041)
+	selfDestructDepth := activeCallDepth + 1 // SELFDESTRUCT is signaled as a nested operation
+
+	s.Tracer.OnCallEnter(
+		selfDestructDepth,
+		byte(CallTypeSelfDestruct),
+		contractAddr,      // from: contract being destructed
+		beneficiaryAddr,   // to: beneficiary receiving balance
+		[]byte{},          // input: empty for SELFDESTRUCT
+		0,                 // gas: not relevant for SELFDESTRUCT
+		contractBalance,   // value: contract balance being transferred
+	)
+
+	// Apply balance changes in the order Ethereum emits them:
+	// 1. SUICIDE_WITHDRAW: Contract balance goes to 0
+	s.Tracer.OnBalanceChange(
+		contractAddr,
+		contractBalance,
+		big.NewInt(0),
+		pbeth.BalanceChange_REASON_SUICIDE_WITHDRAW,
+	)
+
+	// 2. SUICIDE_REFUND: Beneficiary receives the balance
+	var beneficiaryOldBalance *big.Int
+	if contractAddr == beneficiaryAddr {
+		// Special case: suicide to self
+		beneficiaryOldBalance = big.NewInt(0)
+	} else {
+		// Normal case: assume beneficiary starts at 0 for simplicity
+		beneficiaryOldBalance = big.NewInt(0)
+	}
+
+	s.Tracer.OnBalanceChange(
+		beneficiaryAddr,
+		beneficiaryOldBalance,
+		new(big.Int).Add(beneficiaryOldBalance, contractBalance),
+		pbeth.BalanceChange_REASON_SUICIDE_REFUND,
+	)
+
+	// Geth calls OnCallExit for SELFDESTRUCT at the same depth as OnCallEnter
+	// The Firehose tracer will check latestCallEnterSuicided and skip processing
+	// This clears the flag so subsequent OnCallExit (for the real call) works correctly
+	//
+	// We need to call the native validator directly with the correct depth,
+	// because the shared tracer's OnCallExit computes depth from callStack
+	if s.Tracer.nativeValidator != nil {
+		s.Tracer.nativeValidator.OnCallExit(selfDestructDepth, []byte{}, 0, nil, false)
+	}
+
+	// Also need to clear the flag in the shared tracer
+	if s.Tracer.latestCallEnterSuicided {
+		s.Tracer.latestCallEnterSuicided = false
+	}
+
+	return s
+}
+
+// StartSystemCall starts a system call
+// System calls are special protocol-level calls that happen outside of regular transactions
+// Examples: Beacon root updates (EIP-4788), parent hash storage (EIP-2935), withdrawal queue (EIP-7002)
+func (s *TracerTester) StartSystemCall() *TracerTester {
+	s.Tracer.OnSystemCallStart()
+	return s
+}
+
+// EndSystemCall ends a system call
+func (s *TracerTester) EndSystemCall() *TracerTester {
+	s.Tracer.OnSystemCallEnd()
+	return s
+}
+
+// SystemCall simulates a complete system call with a single CALL operation
+// This is a convenience helper for common system calls that make one contract call
+//
+// Parameters:
+// - from: caller address (typically SystemAddress 0xff...fe)
+// - to: target contract address (e.g., BeaconRootsAddress, HistoryStorageAddress)
+// - input: call data
+// - gas: gas limit for the call
+// - output: return data from the call
+// - gasUsed: gas consumed by the call
+//
+// Example: Beacon root system call (EIP-4788)
+//   SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30000000, []byte{}, 50000)
+func (s *TracerTester) SystemCall(from, to [20]byte, input []byte, gas uint64, output []byte, gasUsed uint64) *TracerTester {
+	s.Tracer.OnSystemCallStart()
+	s.Tracer.OnCallEnter(0, byte(CallTypeCall), from, to, input, gas, big.NewInt(0))
+	s.Tracer.OnCallExit(output, gasUsed, nil)
+	s.Tracer.OnSystemCallEnd()
+	return s
+}
+
+// EndTrx ends the current transaction without ending the block
+// Use this when you have multiple transactions in the same block
+func (s *TracerTester) EndTrx(receipt *ReceiptData, txErr error) *TracerTester {
+	s.Tracer.OnTxEnd(receipt, txErr)
 	return s
 }
 

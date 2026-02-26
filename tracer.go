@@ -718,6 +718,10 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 		t.transaction.GasUsed = receipt.GasUsed
 		t.transaction.Receipt = t.newReceiptFromData(receipt)
 
+		// Assign ordinals and indexes to receipt logs from call logs
+		// (matching native tracer's assignOrdinalAndIndexToReceiptLogs)
+		t.assignOrdinalAndIndexToReceiptLogs()
+
 		if receipt.Status == 1 {
 			t.transaction.Status = pbeth.TransactionTraceStatus_SUCCEEDED
 		} else {
@@ -729,6 +733,10 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	if rootCall.StatusReverted {
 		t.transaction.Status = pbeth.TransactionTraceStatus_REVERTED
 	}
+
+	// Copy root call's return data to transaction (matching native tracer line 852)
+	// This is the return value from the top-level contract call
+	t.transaction.ReturnData = rootCall.ReturnData
 
 	// Populate state reverted flags
 	t.populateStateReverted()
@@ -786,6 +794,46 @@ func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionRece
 	return r
 }
 
+// assignOrdinalAndIndexToReceiptLogs copies ordinals and indexes from call logs to receipt logs
+// This matches the native tracer's assignOrdinalAndIndexToReceiptLogs function
+func (t *Tracer) assignOrdinalAndIndexToReceiptLogs() {
+	// Collect all logs from non-reverted calls
+	var callLogs []*pbeth.Log
+	for _, call := range t.transaction.Calls {
+		if call.StateReverted {
+			continue
+		}
+		callLogs = append(callLogs, call.Logs...)
+	}
+
+	// Sort call logs by ordinal to ensure correct ordering
+	slices.SortFunc(callLogs, func(i, j *pbeth.Log) int {
+		return cmp.Compare(i.Ordinal, j.Ordinal)
+	})
+
+	// Get receipt logs
+	var receiptLogs []*pbeth.Log
+	if t.transaction.Receipt != nil {
+		receiptLogs = t.transaction.Receipt.Logs
+	}
+
+	// Validate counts match
+	if len(callLogs) != len(receiptLogs) {
+		panic(fmt.Errorf(
+			"mismatch between call logs and receipt logs: transaction has %d call logs but %d receipt logs",
+			len(callLogs),
+			len(receiptLogs),
+		))
+	}
+
+	// Copy ordinal and index from call logs to receipt logs
+	for i := 0; i < len(callLogs); i++ {
+		receiptLogs[i].Ordinal = callLogs[i].Ordinal
+		receiptLogs[i].Index = callLogs[i].Index
+		receiptLogs[i].BlockIndex = callLogs[i].BlockIndex
+	}
+}
+
 // populateStateReverted walks the call tree and marks reverted state
 func (t *Tracer) populateStateReverted() {
 	// Match native tracer logic: StateReverted is set if parent is reverted OR call failed
@@ -814,6 +862,20 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 	firehoseTrace("call enter (depth=%d type=%d from=%s to=%s value=%d gas=%d input=%s)",
 		depth, typ, shortAddressView(&from), shortAddressView(&to),
 		value, gas, inputView(input))
+
+	// Handle SELFDESTRUCT specially (matching native tracer behavior in firehose.go:1016-1047)
+	// SELFDESTRUCT is not recorded as a call, it just sets a flag for OnCallExit to skip
+	if CallType(typ) == CallTypeSelfDestruct {
+		// Set flag to indicate suicide happened (matching firehose.go:1040-1041)
+		// The next OnCallExit must be ignored, this variable will make it skip processing
+		t.latestCallEnterSuicided = true
+
+		// Don't create a new call for SELFDESTRUCT (matching firehose.go:1038)
+		// Note: The actual call.Suicide marking happens in OnOpcode (firehose.go:1193)
+		// but since we don't have OnOpcode in tests, we'll handle it in the test helper
+		firehoseTrace("SELFDESTRUCT opcode: set latestCallEnterSuicided flag, not creating new call")
+		return
+	}
 
 	call := &pbeth.Call{
 		// Index, Depth, and ParentIndex are set by callStack.Push()
@@ -851,6 +913,15 @@ func (t *Tracer) OnCallExit(output []byte, gasUsed uint64, err error) {
 	// Delegate to native validator before any processing
 	if t.nativeValidator != nil {
 		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
+	}
+
+	// Handle SELFDESTRUCT exit (matching native tracer firehose.go:1420-1429)
+	// Geth native tracer calls OnEnter(SELFDESTRUCT)/OnExit(), but we don't create a call for it
+	// We must skip this OnExit call because we didn't push it on our CallStack
+	if t.latestCallEnterSuicided {
+		firehoseTrace("skipping OnCallExit for SELFDESTRUCT opcode (latestCallEnterSuicided=true)")
+		t.latestCallEnterSuicided = false
+		return
 	}
 
 	// Ensure we're in a valid state (matching native tracer line 1431)
@@ -964,8 +1035,8 @@ func (t *Tracer) newBalanceChange(tag string, addr [20]byte, oldValue, newValue 
 	return &pbeth.BalanceChange{
 		Ordinal:  t.blockOrdinal.Next(),
 		Address:  addr[:],
-		OldValue: &pbeth.BigInt{Bytes: oldValue.Bytes()},
-		NewValue: &pbeth.BigInt{Bytes: newValue.Bytes()},
+		OldValue: bigIntToProtobuf(oldValue),
+		NewValue: bigIntToProtobuf(newValue),
 		Reason:   reason,
 	}
 }
@@ -1150,21 +1221,35 @@ func (t *Tracer) newGasChange(tag string, oldValue, newValue uint64, reason pbet
 // ============================================================================
 
 // OnSystemCallStart is called when a system call starts (chain-specific)
+// Matches native tracer behavior in firehose.go:676-682
 func (t *Tracer) OnSystemCallStart() {
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnSystemCallStart()
+	}
+
 	firehoseInfo("system call start")
+	t.ensureInBlockAndNotInTrx()
+
 	t.inSystemCall = true
+	t.transaction = &pbeth.TransactionTrace{}
 }
 
 // OnSystemCallEnd is called when a system call ends (chain-specific)
+// Matches native tracer behavior in firehose.go:684-691
 func (t *Tracer) OnSystemCallEnd() {
-	firehoseInfo("system call end")
-	t.inSystemCall = false
-
-	// Move any calls created during system call to system calls list
-	if len(t.transaction.Calls) > 0 {
-		t.systemCalls = append(t.systemCalls, t.transaction.Calls...)
-		t.transaction.Calls = nil
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnSystemCallEnd()
 	}
+
+	firehoseInfo("system call end")
+	t.ensureInBlockAndInTrx()
+	t.ensureInSystemCall()
+
+	// Move any calls created during system call to block's system calls list
+	// (matching native tracer line 688)
+	t.block.SystemCalls = append(t.block.SystemCalls, t.transaction.Calls...)
+
+	t.resetTransaction()
 }
 
 // OnOpcode is called for each opcode (optional, for detailed tracing)
