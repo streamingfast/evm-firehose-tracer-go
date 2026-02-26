@@ -165,10 +165,12 @@
 3. ✅ **Block-level code changes** - 3 tests in `tracer_block_level_test.go`
 
 ### P1 (HIGH - Common Edge Cases)
-4. Maximum call depth
-5. Precompiled contracts (all of them)
-6. Out of gas scenarios
-7. Large data scenarios (input/output/logs)
+4. ✅ **Precompiled contracts** - 8 tests added (ecrecover, sha256, ripemd160, bn256Add, bn256ScalarMul, failure cases, multiple/nested)
+5. ✅ **CREATE2 collisions** - 2 tests added (address collision, insufficient funds)
+6. ✅ **Constructor failures** - 4 tests added (with state changes, revert, recursive failure, out of gas)
+7. Maximum call depth
+8. Out of gas scenarios
+9. Large data scenarios (input/output/logs)
 
 ### P2 (MEDIUM - Rare but Important)
 8. OnSkippedBlock

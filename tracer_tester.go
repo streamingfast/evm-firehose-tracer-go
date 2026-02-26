@@ -24,6 +24,7 @@ var (
 	testErrInsufficientBalanceTransfer = vm.ErrInsufficientBalance
 	testErrMaxCallDepth                = vm.ErrDepth
 	testErrOutOfGas                    = vm.ErrOutOfGas
+	testErrInvalidInput                = errors.New("invalid input")
 )
 
 // wrapError wraps an error with a custom reason message

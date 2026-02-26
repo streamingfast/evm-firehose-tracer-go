@@ -530,3 +530,358 @@ func TestTracer_WrappedErrors(t *testing.T) {
 			})
 	})
 }
+
+// TestTracer_Precompiles tests calls to precompiled contracts
+func TestTracer_Precompiles(t *testing.T) {
+	// Precompile addresses (from go-ethereum params/protocol_params.go)
+	ecrecoverAddr := [20]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+	sha256Addr := [20]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02}
+	ripemd160Addr := [20]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03}
+	bn256AddAddr := [20]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06}
+	bn256ScalarMulAddr := [20]byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07}
+
+	t.Run("ecrecover_precompile_success", func(t *testing.T) {
+		// Valid ecrecover input data
+		input := make([]byte, 128)
+		output := make([]byte, 32) // ecrecover returns 32 bytes (address)
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
+			// Contract calls ecrecover precompile
+			StartStaticCall(1, BobAddr, ecrecoverAddr, 5000, input).
+			EndCall(output, 4500, nil).
+			EndCall([]byte{}, 45000, nil).
+			EndBlockTrx(successReceipt(50000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				assert.Equal(t, 2, len(trx.Calls))
+
+				precompileCall := trx.Calls[1]
+				assert.Equal(t, pbeth.CallType_STATIC, precompileCall.CallType)
+				assert.Equal(t, ecrecoverAddr[:], precompileCall.Address)
+				assert.False(t, precompileCall.StatusFailed)
+				assert.Equal(t, uint64(128), uint64(len(precompileCall.Input)))
+				assert.Equal(t, output, precompileCall.ReturnData)
+			})
+	})
+
+	t.Run("sha256_precompile_success", func(t *testing.T) {
+		input := []byte("test data for sha256")
+		output := make([]byte, 32) // sha256 returns 32 bytes
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
+			StartStaticCall(1, BobAddr, sha256Addr, 5000, input).
+			EndCall(output, 4800, nil).
+			EndCall([]byte{}, 45000, nil).
+			EndBlockTrx(successReceipt(50000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				precompileCall := trx.Calls[1]
+				assert.Equal(t, sha256Addr[:], precompileCall.Address)
+				assert.False(t, precompileCall.StatusFailed)
+			})
+	})
+
+	t.Run("ripemd160_precompile_success", func(t *testing.T) {
+		input := []byte("test")
+		output := make([]byte, 32) // ripemd160 returns 32 bytes (20 byte hash right-padded)
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
+			StartStaticCall(1, BobAddr, ripemd160Addr, 5000, input).
+			EndCall(output, 4900, nil).
+			EndCall([]byte{}, 45000, nil).
+			EndBlockTrx(successReceipt(50000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				precompileCall := trx.Calls[1]
+				assert.Equal(t, ripemd160Addr[:], precompileCall.Address)
+				assert.False(t, precompileCall.StatusFailed)
+			})
+	})
+
+	t.Run("bn256_add_precompile_success", func(t *testing.T) {
+		// bn256Add takes 128 bytes (4 * 32-byte values)
+		input := make([]byte, 128)
+		output := make([]byte, 64) // Returns 2 * 32-byte values
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
+			StartStaticCall(1, BobAddr, bn256AddAddr, 10000, input).
+			EndCall(output, 9500, nil).
+			EndCall([]byte{}, 40000, nil).
+			EndBlockTrx(successReceipt(50000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				precompileCall := trx.Calls[1]
+				assert.Equal(t, bn256AddAddr[:], precompileCall.Address)
+				assert.False(t, precompileCall.StatusFailed)
+			})
+	})
+
+	t.Run("bn256_scalar_mul_precompile_success", func(t *testing.T) {
+		// bn256ScalarMul takes 96 bytes
+		input := make([]byte, 96)
+		output := make([]byte, 64)
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
+			StartStaticCall(1, BobAddr, bn256ScalarMulAddr, 10000, input).
+			EndCall(output, 9000, nil).
+			EndCall([]byte{}, 40000, nil).
+			EndBlockTrx(successReceipt(50000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				precompileCall := trx.Calls[1]
+				assert.Equal(t, bn256ScalarMulAddr[:], precompileCall.Address)
+				assert.False(t, precompileCall.StatusFailed)
+			})
+	})
+
+	t.Run("bn256_scalar_mul_precompile_failure", func(t *testing.T) {
+		// Invalid input causes precompile to fail
+		invalidInput := []byte{0x12, 0x34, 0x56} // Wrong size
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
+			StartStaticCall(1, BobAddr, bn256ScalarMulAddr, 10000, invalidInput).
+			EndCall([]byte{}, 0, testErrInvalidInput).
+			EndCall([]byte{}, 40000, nil).
+			EndBlockTrx(successReceipt(50000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				precompileCall := trx.Calls[1]
+				assert.Equal(t, bn256ScalarMulAddr[:], precompileCall.Address)
+				assert.True(t, precompileCall.StatusFailed, "Precompile should fail with invalid input")
+				assert.Equal(t, uint64(0), precompileCall.GasConsumed, "Failed precompile consumes no gas")
+			})
+	})
+
+	t.Run("multiple_precompiles_in_transaction", func(t *testing.T) {
+		// Transaction calls multiple precompiles
+		sha256Input := []byte("test")
+		sha256Output := make([]byte, 32)
+		ecrecoverInput := make([]byte, 128)
+		ecrecoverOutput := make([]byte, 32)
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 80000, []byte{}).
+			// First precompile: sha256
+			StartStaticCall(1, BobAddr, sha256Addr, 5000, sha256Input).
+			EndCall(sha256Output, 4800, nil).
+			// Second precompile: ecrecover
+			StartStaticCall(1, BobAddr, ecrecoverAddr, 5000, ecrecoverInput).
+			EndCall(ecrecoverOutput, 4500, nil).
+			EndCall([]byte{}, 70000, nil).
+			EndBlockTrx(successReceipt(80000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				assert.Equal(t, 3, len(trx.Calls), "Root call + 2 precompile calls")
+
+				assert.Equal(t, sha256Addr[:], trx.Calls[1].Address)
+				assert.Equal(t, ecrecoverAddr[:], trx.Calls[2].Address)
+				assert.False(t, trx.Calls[1].StatusFailed)
+				assert.False(t, trx.Calls[2].StatusFailed)
+			})
+	})
+
+	t.Run("nested_precompile_calls", func(t *testing.T) {
+		// Root call -> Contract call -> Precompile call
+		input := []byte("nested test")
+		output := make([]byte, 32)
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 80000, []byte{}).
+			// Bob calls Charlie
+			StartCall(1, BobAddr, CharlieAddr, bigInt(0), 40000, []byte{}).
+			// Charlie calls sha256 precompile
+			StartStaticCall(2, CharlieAddr, sha256Addr, 5000, input).
+			EndCall(output, 4800, nil).
+			EndCall([]byte{0x01}, 35000, nil).
+			EndCall([]byte{}, 45000, nil).
+			EndBlockTrx(successReceipt(80000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				assert.Equal(t, 3, len(trx.Calls))
+
+				precompileCall := trx.Calls[2]
+				assert.Equal(t, sha256Addr[:], precompileCall.Address)
+				assert.Equal(t, uint32(2), precompileCall.ParentIndex, "Precompile's parent is Charlie (index 2)")
+				assert.False(t, precompileCall.StatusFailed)
+			})
+	})
+}
+
+// TestTracer_CREATE2EdgeCases tests CREATE2-specific edge cases from battlefield tests
+func TestTracer_CREATE2EdgeCases(t *testing.T) {
+	t.Run("create2_collision_address_already_exists", func(t *testing.T) {
+		// Simulate CREATE2 collision: trying to deploy to an address that already has code
+		contractAddr := CharlieAddr
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
+			// First CREATE2 succeeds
+			StartCreate2Call(1, BobAddr, contractAddr, bigInt(0), 100000, []byte{0x60, 0x80}).
+			EndCall([]byte{0x60, 0x80}, 95000, nil).
+			// Second CREATE2 to same address fails
+			StartCreate2Call(1, BobAddr, contractAddr, bigInt(0), 50000, []byte{0x60, 0x80}).
+			EndCall([]byte{}, 0, testErrExecutionReverted).
+			EndCall([]byte{}, 50000, nil).
+			EndBlockTrx(successReceipt(200000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				assert.Equal(t, 3, len(trx.Calls), "Root + 2 CREATE2 calls")
+
+				// First CREATE2 succeeds
+				assert.False(t, trx.Calls[1].StatusFailed)
+				assert.Equal(t, pbeth.CallType_CREATE, trx.Calls[1].CallType)
+
+				// Second CREATE2 fails due to collision
+				assert.True(t, trx.Calls[2].StatusFailed)
+				assert.Equal(t, pbeth.CallType_CREATE, trx.Calls[2].CallType)
+				assert.Equal(t, contractAddr[:], trx.Calls[2].Address)
+			})
+	})
+
+	t.Run("create2_with_insufficient_funds", func(t *testing.T) {
+		// CREATE2 fails because contract doesn't have enough balance to transfer
+		contractAddr := CharlieAddr
+		largeValue := mustBigInt("1000000000000000000000") // 1000 ETH
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			// CREATE2 with value larger than available balance
+			StartCreate2Call(1, BobAddr, contractAddr, largeValue, 50000, []byte{0x60, 0x80}).
+			EndCall([]byte{}, 0, testErrInsufficientBalanceTransfer).
+			EndCall([]byte{}, 50000, nil).
+			EndBlockTrx(successReceipt(100000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				create2Call := trx.Calls[1]
+
+				assert.True(t, create2Call.StatusFailed)
+				assert.True(t, create2Call.StatusReverted, "Insufficient balance should be reverted")
+			})
+	})
+}
+
+// TestTracer_ConstructorEdgeCases tests constructor-related edge cases
+func TestTracer_ConstructorEdgeCases(t *testing.T) {
+	t.Run("constructor_with_storage_and_logs", func(t *testing.T) {
+		// Constructor performs state changes
+		contractAddr := CharlieAddr
+		code := []byte{0x60, 0x80, 0x60, 0x40, 0x52}
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCreateCall(1, BobAddr, contractAddr, bigInt(0), 80000, code).
+			// Constructor changes storage
+			StorageChange(contractAddr, hash32(1), hash32(0), hash32(100)).
+			// Constructor emits log
+			Log(contractAddr, [][32]byte{hash32(1)}, []byte{0xaa, 0xbb}, 0).
+			EndCall(code, 70000, nil).
+			EndCall([]byte{}, 30000, nil).
+			EndBlockTrx(receiptWithLogs(100000, []LogData{
+				{Address: contractAddr, Topics: [][32]byte{hash32(1)}, Data: []byte{0xaa, 0xbb}},
+			}), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				createCall := trx.Calls[1]
+
+				assert.False(t, createCall.StatusFailed)
+				assert.Equal(t, 1, len(createCall.StorageChanges))
+				assert.Equal(t, 1, len(createCall.Logs))
+			})
+	})
+
+	t.Run("constructor_fails_reverts_state_changes", func(t *testing.T) {
+		// Constructor that fails should revert its state changes
+		contractAddr := CharlieAddr
+		code := []byte{0x60, 0x80}
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCreateCall(1, BobAddr, contractAddr, bigInt(0), 80000, code).
+			// Constructor tries to change storage (will be reverted)
+			StorageChange(contractAddr, hash32(1), hash32(0), hash32(100)).
+			// Constructor fails
+			EndCall([]byte{}, 0, testErrExecutionReverted).
+			EndCall([]byte{}, 20000, nil).
+			EndBlockTrx(successReceipt(100000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				createCall := trx.Calls[1]
+
+				assert.True(t, createCall.StatusFailed)
+				assert.True(t, createCall.StatusReverted)
+				// Storage changes exist in call but should be marked as reverted
+				assert.Equal(t, 1, len(createCall.StorageChanges))
+			})
+	})
+
+	t.Run("recursive_constructor_failure", func(t *testing.T) {
+		// Constructor creates another contract, which fails
+		firstContractAddr := CharlieAddr
+		secondContractAddr := addressFromHex("0x0000000000000000000000000000000000000abc")
+		code := []byte{0x60, 0x80}
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
+			// First CREATE
+			StartCreateCall(1, BobAddr, firstContractAddr, bigInt(0), 150000, code).
+			// First constructor creates second contract
+			StartCreateCall(2, firstContractAddr, secondContractAddr, bigInt(0), 80000, code).
+			// Second constructor fails
+			EndCall([]byte{}, 0, testErrExecutionReverted).
+			// First constructor also fails due to nested failure
+			EndCall([]byte{}, 0, testErrExecutionReverted).
+			EndCall([]byte{}, 50000, nil).
+			EndBlockTrx(successReceipt(200000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				assert.Equal(t, 3, len(trx.Calls), "Root + 2 CREATE calls")
+
+				// Both CREATEs should fail
+				assert.True(t, trx.Calls[1].StatusFailed, "First CREATE should fail")
+				assert.True(t, trx.Calls[2].StatusFailed, "Second CREATE should fail")
+				assert.Equal(t, uint32(2), trx.Calls[2].ParentIndex, "Second CREATE's parent is first CREATE")
+			})
+	})
+
+	t.Run("constructor_out_of_gas", func(t *testing.T) {
+		// Constructor runs out of gas during execution
+		contractAddr := CharlieAddr
+		code := []byte{0x60, 0x80}
+
+		NewTracerTester(t).
+			StartBlockTrx().
+			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCreateCall(1, BobAddr, contractAddr, bigInt(0), 50000, code).
+			// Constructor runs out of gas
+			EndCall([]byte{}, 0, testErrOutOfGas).
+			EndCall([]byte{}, 50000, nil).
+			EndBlockTrx(successReceipt(100000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				createCall := trx.Calls[1]
+
+				assert.True(t, createCall.StatusFailed)
+				assert.False(t, createCall.StatusReverted, "Out of gas is not reverted")
+				assert.Equal(t, uint64(0), createCall.GasConsumed)
+			})
+	})
+}
