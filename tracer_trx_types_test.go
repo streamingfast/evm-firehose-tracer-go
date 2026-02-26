@@ -115,13 +115,21 @@ func TestTracer_TxTypes(t *testing.T) {
 	})
 
 	t.Run("set_code", func(t *testing.T) {
-		// Use properly signed SetCode transaction with valid EIP-7702 authorization
-		tester, authorizerAddr, err := NewTracerTester(t).StartBlockSetCodeTrxSigned()
-		require.NoError(t, err, "Failed to create signed SetCode transaction")
+		// Create a properly signed SetCode authorization
+		auth, err := SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
+		require.NoError(t, err)
+
+		txEvent := new(TxEventBuilder).
+			Defaults().
+			Type(TxTypeSetCode).
+			SetCodeAuthorizations([]SetCodeAuthorization{auth}).
+			Build()
+
+		tester := NewTracerTester(t).startBlockTrxWithEvent(txEvent)
 
 		// EIP-7702: Authorization application happens BEFORE the root call
 		// The authorizer's nonce is incremented when the authorization is applied
-		tester.NonceChange(authorizerAddr, 0, 1)
+		tester.NonceChange(AliceAddr, 0, 1)
 
 		tester.
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).

@@ -221,6 +221,34 @@ func (t *TxEventBuilder) SetCodeAuthorizations(authList []SetCodeAuthorization) 
 	return t
 }
 
+// Defaults sets common default values for testing:
+// - Type: Legacy (0)
+// - Hash: Zero hash (usually computed by native validator)
+// - From: Alice
+// - To: Bob
+// - Value: 100 wei
+// - Gas: 21000 (standard transfer)
+// - GasPrice: 10 wei
+// - Nonce: 0
+// - MaxFeePerGas: 20 wei (for EIP-1559 transactions)
+// - MaxPriorityFeePerGas: 2 wei (for EIP-1559 transactions)
+//
+// Does NOT set: AccessList, BlobGasFeeCap, BlobHashes, SetCodeAuthorizations
+// (these should be set explicitly when needed)
+func (t *TxEventBuilder) Defaults() *TxEventBuilder {
+	return t.
+		Type(TxTypeLegacy).
+		Hash("0x0000000000000000000000000000000000000000000000000000000000000000").
+		From(Alice).
+		To(Bob).
+		Value(bigInt(100)).
+		Gas(21000).
+		GasPrice(bigInt(10)).
+		Nonce(0).
+		MaxFeePerGas(bigInt(20)).
+		MaxPriorityFeePerGas(bigInt(2))
+}
+
 func (t *TxEventBuilder) Build() TxEvent {
 	return TxEvent{
 		Type:                  t.txType,

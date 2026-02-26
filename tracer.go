@@ -513,26 +513,50 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 	}
 
 	// Set EIP-7702 set code authorization list (type 4)
-	// If we have a native validator, use the validated authorizations from it
-	// (with Authority field populated from signature recovery)
+	// Validate signatures and populate Authority field using chain-specific recovery
 	if len(event.SetCodeAuthorizations) > 0 {
-		if t.nativeValidator != nil && t.nativeValidator.tracer != nil {
-			// Use the validated authorizations from native tracer
-			// The native tracer has already validated signatures and populated Authority fields
-			trx.SetCodeAuthorizations = t.nativeValidator.tracer.TransactionForTesting().SetCodeAuthorizations
-		} else {
-			// No native validator - copy raw authorizations without validation
-			trx.SetCodeAuthorizations = make([]*pbeth.SetCodeAuthorization, len(event.SetCodeAuthorizations))
-			for i, auth := range event.SetCodeAuthorizations {
-				trx.SetCodeAuthorizations[i] = &pbeth.SetCodeAuthorization{
-					ChainId: auth.ChainID[:],
-					Address: auth.Address[:],
-					Nonce:   auth.Nonce,
-					V:       auth.V,
-					R:       auth.R[:],
-					S:       auth.S[:],
-				}
+		// Use chain-specific recovery function, or default to standard Ethereum ECDSA recovery
+		recoveryFunc := DefaultSetCodeAuthRecovery
+		if t.chainConfig != nil && t.chainConfig.SetCodeAuthRecovery != nil {
+			recoveryFunc = t.chainConfig.SetCodeAuthRecovery
+		}
+
+		trx.SetCodeAuthorizations = make([]*pbeth.SetCodeAuthorization, len(event.SetCodeAuthorizations))
+		for i, auth := range event.SetCodeAuthorizations {
+			// Convert ChainID from [32]byte to minimal bytes representation
+			// (same as native tracer which uses authorization.ChainID.Bytes())
+			chainID := new(big.Int).SetBytes(auth.ChainID[:])
+
+			pbAuth := &pbeth.SetCodeAuthorization{
+				ChainId: chainID.Bytes(),
+				Address: auth.Address[:],
+				Nonce:   auth.Nonce,
+				V:       auth.V,
+				R:       auth.R[:],
+				S:       auth.S[:],
 			}
+
+			// Recover authority (signer address) from signature
+			authority, err := recoveryFunc(
+				auth.ChainID,
+				auth.Address,
+				auth.Nonce,
+				auth.V,
+				auth.R,
+				auth.S,
+			)
+			if err != nil {
+				// Signature recovery failed - mark as discarded
+				// Authority remains nil
+				pbAuth.Discarded = true
+				firehoseDebug("failed to recover authority for SetCode authorization at index %d: %v", i, err)
+			} else {
+				// Signature is valid - populate authority
+				pbAuth.Authority = authority[:]
+				// Note: Discarded flag will be set later if no corresponding nonce change
+			}
+
+			trx.SetCodeAuthorizations[i] = pbAuth
 		}
 	}
 
@@ -618,10 +642,17 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	// Get root call
 	rootCall := t.transaction.Calls[0]
 
-	// Move any remaining deferred state to root call
+	// Move any remaining deferred state to root call FIRST
+	// (this includes nonce changes that occur before the root call starts)
 	if !t.deferredCallState.IsEmpty() {
 		t.deferredCallState.MaybePopulateCallAndReset("root", rootCall)
 	}
+
+	// Discard SetCode authorizations that don't have corresponding nonce changes
+	// (matching native tracer's discardUncommittedSetCodeAuthorization)
+	// This MUST happen after deferred state is populated, since EIP-7702 nonce changes
+	// occur before the root call starts
+	t.discardUncommittedSetCodeAuthorizations(rootCall)
 
 	// Populate receipt data
 	if receipt != nil {
@@ -739,6 +770,55 @@ func (t *Tracer) populateStateReverted() {
 		}
 
 		call.StateReverted = (parent != nil && parent.StateReverted) || call.StatusFailed
+	}
+}
+
+// discardUncommittedSetCodeAuthorizations marks SetCode authorizations as discarded
+// if they don't have a corresponding nonce change in the root call.
+//
+// Per EIP-7702, when an authorization is applied, the authorizer's nonce is incremented.
+// If we don't see this nonce change, it means the authorization was not actually applied
+// (e.g., wrong nonce, already used, validation failed in EVM, etc.)
+//
+// Matches native tracer behavior in firehose.go:883-914
+func (t *Tracer) discardUncommittedSetCodeAuthorizations(rootCall *pbeth.Call) {
+	if len(t.transaction.SetCodeAuthorizations) == 0 {
+		return
+	}
+
+	// Build a map to track which nonce changes we've used
+	// (each nonce change can only match one authorization)
+	usedNonceChange := make(map[int]bool)
+
+	// Helper to find a matching nonce change for an authorization
+	findNonceChange := func(forAddress []byte, nonce uint64) *pbeth.NonceChange {
+		for i, change := range rootCall.NonceChanges {
+			if change.OldValue == nonce &&
+				change.NewValue == nonce+1 &&
+				bytes.Equal(change.Address, forAddress) &&
+				!usedNonceChange[i] {
+				usedNonceChange[i] = true
+				return change
+			}
+		}
+		return nil
+	}
+
+	// Check each authorization for a matching nonce change
+	for _, auth := range t.transaction.SetCodeAuthorizations {
+		if len(auth.Authority) == 0 {
+			// No authority (signature recovery failed) - already marked as discarded
+			auth.Discarded = true
+			continue
+		}
+
+		// Look for nonce change matching this authorization
+		if findNonceChange(auth.Authority, auth.Nonce) == nil {
+			// No matching nonce change found - authorization was not applied
+			firehoseDebug("discarded SetCode authorization: no matching nonce change (authority=%x nonce=%d)",
+				auth.Authority, auth.Nonce)
+			auth.Discarded = true
+		}
 	}
 }
 

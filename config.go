@@ -34,8 +34,8 @@ type ChainConfig struct {
 	VerkleTime   *uint64 // Verkle tree transition (future)
 
 	// SetCodeAuthRecovery is a chain-specific function to recover authority from EIP-7702 authorizations
-	// If nil, SetCode authorizations will not have their Authority field populated
-	// Chain implementations should provide this to enable proper SetCode validation
+	// If nil, DefaultSetCodeAuthRecovery will be used (standard Ethereum ECDSA signature recovery)
+	// Custom chains can override this if they use different signature schemes
 	SetCodeAuthRecovery SetCodeAuthRecovery
 }
 

@@ -10,9 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -167,12 +165,16 @@ type TracerTester struct {
 
 // NewTracerTester creates a new tester builder with native validator
 func NewTracerTester(t *testing.T) *TracerTester {
+	chainConfig := &ChainConfig{
+		ChainID: big.NewInt(1),
+		// Use Ethereum-style signature recovery for SetCode authorizations
+		SetCodeAuthRecovery: EthereumSetCodeAuthRecovery,
+	}
+
 	tester := &TracerTester{
 		t: t,
 		Tracer: NewTracer(&Config{
-			ChainConfig: &ChainConfig{
-				ChainID: big.NewInt(1),
-			},
+			ChainConfig:  chainConfig,
 			OutputWriter: &bytes.Buffer{},
 		}),
 	}
@@ -181,7 +183,7 @@ func NewTracerTester(t *testing.T) *TracerTester {
 	tester.Tracer.nativeValidator, err = newNativeValidator("")
 	require.NoError(t, err, "creating native validator")
 
-	tester.Tracer.OnBlockchainInit("test", "1.0.0", tester.Tracer.chainConfig)
+	tester.Tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
 
 	return tester
 }
@@ -224,22 +226,6 @@ func (s *TracerTester) StartBlockBlobTrx() *TracerTester {
 // StartBlockSetCodeTrx starts a block and an EIP-7702 set code (type 4) transaction
 func (s *TracerTester) StartBlockSetCodeTrx() *TracerTester {
 	return s.startBlockTrxWithEvent(TestSetCodeTrx)
-}
-
-// StartBlockSetCodeTrxSigned starts a block and an EIP-7702 set code (type 4) transaction
-// with properly signed authorization that will pass native tracer validation.
-// Returns the authorizer address (the account that signed the authorization).
-func (s *TracerTester) StartBlockSetCodeTrxSigned() (*TracerTester, common.Address, error) {
-	// Create a properly signed SetCode transaction
-	txEvent, authorizerKey, err := CreateValidSetCodeTrxEvent()
-	if err != nil {
-		return nil, common.Address{}, err
-	}
-
-	// Get the authorizer address from the key
-	authorizerAddr := crypto.PubkeyToAddress(authorizerKey.PublicKey)
-
-	return s.startBlockTrxWithEvent(*txEvent), authorizerAddr, nil
 }
 
 // StartBlockTrxNoHooks starts a block and transaction WITHOUT automatic hooks

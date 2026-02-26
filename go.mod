@@ -3,7 +3,10 @@ module github.com/streamingfast/evm-firehose-tracer-go
 go 1.25.4
 
 require (
+	github.com/btcsuite/btcd/btcec/v2 v2.3.6
 	github.com/ethereum/go-ethereum v1.17.0
+	github.com/holiman/uint256 v1.3.2
+	github.com/streamingfast/eth-go v0.0.0-20260216202159-4e2b7501894a
 	github.com/streamingfast/firehose-ethereum/types v0.0.0-20260224133825-8b12d7de947d
 	github.com/streamingfast/logging v0.0.0-20260108192805-38f96de0a641
 	github.com/stretchr/testify v1.11.1
@@ -36,7 +39,6 @@ require (
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
-	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
