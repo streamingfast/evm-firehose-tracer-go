@@ -1345,24 +1345,39 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScop
 		t.nativeValidator.OnOpcode(pc, op, gas, cost, depth)
 	}
 
-	call := t.callStack.Peek()
-	if call == nil {
+	activeCall := t.callStack.Peek()
+	if activeCall == nil {
 		return
 	}
 
 	// Set ExecutedCode to true (non-backward-compatible mode)
 	// This matches native tracer behavior in captureInterpreterStep (firehose.go:1296)
 	// Note: Native tracer ALWAYS sets this, no trace level check
-	call.ExecutedCode = true
+	activeCall.ExecutedCode = true
+
+	// The rest of the logic expects that a call succeeded, nothing to do more here if the interpreter failed on this OpCode
+	// if err != nil {
+	// 	return
+	// }
+
+	// // The gas change must come first to retain Firehose backward compatibility. Indeed, before Firehose 3.0,
+	// // we had a specific method `OnKeccakPreimage` that was called during the KECCAK256 opcode. However, in
+	// // the new model, we do it through `OnOpcode`.
+	// //
+	// // The gas change recording in the previous Firehose patch was done before calling `OnKeccakPreimage` so
+	// // we must do the same here.
+	// //
+	// // No need to wrap in apply backward compatibility, the old behavior is fine in all cases.
+	// if cost > 0 {
+	// 	if reason, found := opCodeToGasChangeReasonMap[opCode]; found {
+	// 		activeCall.GasChanges = append(activeCall.GasChanges, f.newGasChange("state", gas, gas-cost, reason))
+	// 	}
+	// }
 
 	// Mark SELFDESTRUCT opcode (matching native tracer firehose.go:1193)
 	if op == 0xff { // SELFDESTRUCT opcode
-		call.Suicide = true
+		activeCall.Suicide = true
 	}
-
-	// Detailed opcode-level tracing could be added here
-	// For now, we skip it as it's very verbose
-	// (would add gas changes, keccak preimages, etc.)
 }
 
 // OnKeccakPreimage is called when a keccak256 preimage is available
@@ -1394,14 +1409,27 @@ func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 }
 
 // OnOpcodeFault is called when an opcode execution fails
+// This is called for opcodes that fault during execution (like invalid opcode, stack underflow, etc.)
+// The actual failure handling happens in OnCallExit when err != nil
 func (t *Tracer) OnOpcodeFault(pc uint64, op byte, gas, cost uint64, scope OpcodeScopeData, depth int, err error) {
+	// Call native validator if present
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnOpcodeFault(pc, op, gas, cost, depth, err)
+	}
+
 	firehoseDebug("opcode fault (pc=%d op=%d err=%v)", pc, op, err)
 
 	call := t.callStack.Peek()
-	if call != nil {
-		call.StatusFailed = true
-		call.FailureReason = err.Error()
+	if call == nil {
+		return
 	}
+
+	// Set ExecutedCode to true (matches native tracer behavior in captureInterpreterStep)
+	// Even faulted opcodes count as executed code
+	call.ExecutedCode = true
+
+	// Note: StatusFailed and FailureReason are set in OnCallExit, not here
+	// The fault will propagate to OnCallExit as an error
 }
 
 // ============================================================================

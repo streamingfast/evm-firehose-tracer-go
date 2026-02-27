@@ -320,6 +320,18 @@ func (s *TracerTester) Keccak(hash [32]byte, preimage []byte) *TracerTester {
 	return s
 }
 
+// OpCodeFault simulates an opcode fault during execution
+// This ensures both shared and native tracers handle opcode faults correctly
+func (s *TracerTester) OpCodeFault(pc uint64, op byte, gas, cost uint64, err error) *TracerTester {
+	// Call shared tracer's OnOpcodeFault
+	// This will call the native validator internally if present
+	emptyScope := firehose.OpcodeScopeData{}
+	activeCallDepth := s.depth - 1 // Depth of the active call
+	s.Tracer.OnOpcodeFault(pc, op, gas, cost, emptyScope, activeCallDepth, err)
+
+	return s
+}
+
 // BalanceChange records a balance change
 func (s *TracerTester) BalanceChange(addr [20]byte, oldBalance, newBalance *big.Int, reason pbeth.BalanceChange_Reason) *TracerTester {
 	s.Tracer.OnBalanceChange(addr, oldBalance, newBalance, reason)

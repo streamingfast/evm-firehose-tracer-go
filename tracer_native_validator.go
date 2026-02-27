@@ -383,6 +383,15 @@ func (v *nativeValidator) OnOpcode(pc uint64, op byte, gas, cost uint64, depth i
 	v.tracer.OnOpcode(pc, op, gas, cost, nil, nil, depth, nil)
 }
 
+func (v *nativeValidator) OnOpcodeFault(pc uint64, op byte, gas, cost uint64, depth int, err error) {
+	if v == nil {
+		return
+	}
+
+	// Call native tracer's OnOpcodeFault with minimal parameters
+	v.tracer.OnOpcodeFault(pc, op, gas, cost, nil, depth, err)
+}
+
 func (v *nativeValidator) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 	if v == nil {
 		return
