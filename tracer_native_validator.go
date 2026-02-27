@@ -52,6 +52,82 @@ func (v *nativeValidator) OnBlockchainInit(chainConfig *ChainConfig) {
 	v.tracer.OnBlockchainInit(nativeConfig)
 }
 
+func (v *nativeValidator) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
+	if v == nil {
+		return
+	}
+
+	// Convert BlockData to native types.Block
+	nativeBlock := convertBlockDataToNativeBlock(&event.Block)
+
+	// Convert GenesisAlloc to native format
+	nativeAlloc := convertToNativeGenesisAlloc(alloc)
+
+	v.tracer.OnGenesisBlock(nativeBlock, nativeAlloc)
+}
+
+// convertBlockDataToNativeBlock converts our BlockData to go-ethereum's types.Block
+func convertBlockDataToNativeBlock(data *BlockData) *types.Block {
+	header := &types.Header{
+		ParentHash:  common.Hash(data.ParentHash),
+		UncleHash:   common.Hash(data.UncleHash),
+		Coinbase:    common.Address(data.Coinbase),
+		Root:        common.Hash(data.Root),
+		TxHash:      common.Hash(data.TxHash),
+		ReceiptHash: common.Hash(data.ReceiptHash),
+		Bloom:       types.BytesToBloom(data.Bloom),
+		Difficulty:  data.Difficulty,
+		Number:      big.NewInt(int64(data.Number)),
+		GasLimit:    data.GasLimit,
+		GasUsed:     data.GasUsed,
+		Time:        data.Time,
+		Extra:       data.Extra,
+		MixDigest:   common.Hash(data.MixDigest),
+		Nonce:       types.EncodeNonce(data.Nonce),
+		BaseFee:     data.BaseFee,
+		// Note: Block hash is computed from header, not set directly
+		// The hash in BlockData is informational only
+	}
+
+	// For PoS blocks, set difficulty to zero if nil
+	if header.Difficulty == nil {
+		header.Difficulty = big.NewInt(0)
+	}
+
+	// Create block with just the header (genesis block has no transactions)
+	block := types.NewBlockWithHeader(header)
+
+	// Return the block - its hash will be computed from the header
+	return block
+}
+
+// convertToNativeGenesisAlloc converts our GenesisAlloc to go-ethereum's types.GenesisAlloc
+func convertToNativeGenesisAlloc(alloc GenesisAlloc) types.GenesisAlloc {
+	nativeAlloc := make(types.GenesisAlloc, len(alloc))
+
+	for addr, account := range alloc {
+		nativeAddr := common.Address(addr)
+
+		// Convert storage map from [32]byte keys to common.Hash keys
+		var nativeStorage map[common.Hash]common.Hash
+		if len(account.Storage) > 0 {
+			nativeStorage = make(map[common.Hash]common.Hash, len(account.Storage))
+			for key, value := range account.Storage {
+				nativeStorage[common.Hash(key)] = common.Hash(value)
+			}
+		}
+
+		nativeAlloc[nativeAddr] = types.Account{
+			Code:    account.Code,
+			Storage: nativeStorage,
+			Balance: account.Balance,
+			Nonce:   account.Nonce,
+		}
+	}
+
+	return nativeAlloc
+}
+
 // convertToNativeChainConfig converts our ChainConfig to go-ethereum's params.ChainConfig
 func convertToNativeChainConfig(cfg *ChainConfig) *params.ChainConfig {
 	if cfg == nil {

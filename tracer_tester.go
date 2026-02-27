@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/require"
@@ -613,6 +614,72 @@ func (s *TracerTester) EndBlockTrx(receipt *ReceiptData, txErr, blockErr error) 
 
 func (s *TracerTester) EndBlock(err error) *TracerTester {
 	s.Tracer.OnBlockEnd(err)
+	return s
+}
+
+// GenesisBlock processes a genesis block with the given allocation
+// This creates a complete genesis block trace with deterministic ordering
+func (s *TracerTester) GenesisBlock(blockNumber uint64, blockHash [32]byte, alloc GenesisAlloc) *TracerTester {
+	// Standard genesis block header values
+	// EmptyUncleHash = 1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347
+	emptyUncleHash := mustHash32FromHex("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+	// EmptyTxsHash = EmptyReceiptsHash = 56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421
+	emptyTxsHash := mustHash32FromHex("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+
+	// Create a properly formed genesis block header that will hash deterministically
+	// We use the provided blockHash as the state root, and let go-ethereum compute the block hash from the header
+	header := &types.Header{
+		ParentHash:  common.Hash{},                          // Genesis has no parent
+		UncleHash:   common.Hash(emptyUncleHash),            // Standard empty uncle hash
+		Coinbase:    common.Address{},                       // Zero address
+		Root:        common.Hash(blockHash),                 // Use provided hash as state root (for testing)
+		TxHash:      common.Hash(emptyTxsHash),              // Standard empty transactions hash
+		ReceiptHash: common.Hash(emptyTxsHash),              // Standard empty receipts hash
+		Bloom:       types.Bloom{},                          // Empty bloom filter
+		Difficulty:  big.NewInt(0),                          // PoS blocks have zero difficulty
+		Number:      big.NewInt(int64(blockNumber)),         // Block number
+		GasLimit:    8000000,                                // Default gas limit
+		GasUsed:     0,                                      // Genesis has no gas used
+		Time:        0,                                      // Genesis time
+		Extra:       nil,                                    // No extra data
+		MixDigest:   common.Hash{},                          // Empty mix digest
+		Nonce:       types.BlockNonce{},                     // Empty nonce
+		BaseFee:     nil,                                    // No base fee for genesis
+	}
+
+	// Compute the actual block hash from the header using go-ethereum's native hash function
+	// This ensures both the shared tracer and native validator use the same hash
+	computedHash := header.Hash()
+
+	// Create a types.Block to compute the block size (RLP-encoded size)
+	block := types.NewBlockWithHeader(header)
+	blockSize := block.Size()
+
+	event := BlockEvent{
+		Block: BlockData{
+			Number:      blockNumber,
+			Hash:        [32]byte(computedHash),     // Use computed hash
+			ParentHash:  [32]byte{},                 // Genesis has no parent
+			UncleHash:   emptyUncleHash,             // Standard empty uncle hash
+			Coinbase:    [20]byte{},                 // Zero address
+			Root:        blockHash,                  // State root (provided by test)
+			TxHash:      emptyTxsHash,               // Standard empty transactions hash
+			ReceiptHash: emptyTxsHash,               // Standard empty receipts hash
+			Bloom:       make([]byte, 256),          // Empty 256-byte logs bloom filter
+			Difficulty:  big.NewInt(0),              // PoS blocks have zero difficulty
+			GasLimit:    8000000,                    // Default gas limit
+			GasUsed:     0,                          // Genesis has no gas used
+			Time:        0,
+			Extra:       nil,
+			MixDigest:   [32]byte{},
+			Nonce:       0,
+			BaseFee:     nil,
+			Size:        blockSize,                  // Computed RLP-encoded block size
+		},
+	}
+
+	s.Tracer.OnGenesisBlock(event, alloc)
+
 	return s
 }
 

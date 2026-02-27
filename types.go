@@ -266,9 +266,6 @@ func (h Hash) IsZero() bool {
 // EmptyAddress is the zero address
 var EmptyAddress = Address{}
 
-// EmptyHash is the zero hash
-var EmptyHash = Hash{}
-
 // BigIntZero is a shared zero big.Int for convenience
 var BigIntZero = big.NewInt(0)
 
@@ -306,3 +303,30 @@ func errorIsString(err error, target string) bool {
 
 	return false
 }
+
+var (
+	// EmptyHash represents the zero hash (32 bytes of zeros)
+	// Defined here for use in types and throughout the codebase
+	EmptyHash = [32]byte{}
+)
+
+// GenesisAccount represents an account in the genesis block allocation
+// This is a simplified version of go-ethereum's types.Account for tracer use
+type GenesisAccount struct {
+	// Code is the contract bytecode (if this is a contract account)
+	Code []byte
+
+	// Storage is the contract storage (key-value pairs)
+	// Keys and values are 32-byte hashes
+	Storage map[[32]byte][32]byte
+
+	// Balance is the account balance in wei
+	Balance *big.Int
+
+	// Nonce is the account nonce
+	Nonce uint64
+}
+
+// GenesisAlloc is a map of addresses to genesis accounts
+// This represents the initial state allocation in the genesis block
+type GenesisAlloc map[[20]byte]GenesisAccount

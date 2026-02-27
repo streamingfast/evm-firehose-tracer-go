@@ -2,6 +2,7 @@ package firehose
 
 import (
 	"crypto/ecdsa"
+	"encoding/hex"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/crypto"
@@ -77,6 +78,31 @@ func mustBigInt(s string) *big.Int {
 		panic("invalid big int: " + s)
 	}
 	return n
+}
+
+// mustHash32FromHex converts a hex string to a [32]byte hash
+// Panics if the hex string is invalid or not 32 bytes
+func mustHash32FromHex(s string) [32]byte {
+	// Remove 0x prefix if present
+	if len(s) >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') {
+		s = s[2:]
+	}
+
+	// Decode hex string
+	bytes, err := hex.DecodeString(s)
+	if err != nil {
+		panic("invalid hex string: " + s + ": " + err.Error())
+	}
+
+	// Check length
+	if len(bytes) != 32 {
+		panic("hex string must be 32 bytes, got " + string(rune(len(bytes))))
+	}
+
+	// Convert to [32]byte
+	var hash [32]byte
+	copy(hash[:], bytes)
+	return hash
 }
 
 // successReceipt creates a successful receipt (status 1) with the given gas used

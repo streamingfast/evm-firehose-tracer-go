@@ -31,6 +31,11 @@ const (
 	errMaxCallDepth                = "max call depth exceeded"
 )
 
+var (
+	// bigZero represents the big.Int value of zero
+	bigZero = big.NewInt(0)
+)
+
 // Tracer is the main Firehose tracer that captures EVM execution and produces
 // protobuf blocks for indexing. It can operate in two modes:
 // - Coordinator mode (default): Manages block-level state and transaction traces
@@ -224,18 +229,104 @@ func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConf
 }
 
 // OnGenesisBlock is called for the genesis block
-func (t *Tracer) OnGenesisBlock(event BlockEvent) {
+func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 	if t.testingIgnoreGenesisBlock {
 		return
 	}
 
-	firehoseInfo("genesis block (number=%d)", event.Block.Number)
+	firehoseInfo("genesis block (number=%d hash=%x)", event.Block.Number, event.Block.Hash)
 
-	// Trace genesis as a normal block
+	// Going to be reset in OnBlockEnd
 	t.blockIsGenesis = true
+
+	// Start block
 	t.OnBlockStart(event)
+
+	// Create a synthetic transaction to hold all genesis changes
+	// This matches the native tracer behavior (creating a synthetic empty transaction)
+	zeroAddr := [20]byte{} // Zero address
+	t.OnTxStart(TxEvent{
+		Hash: [32]byte{}, // Empty hash for genesis
+		From: [20]byte{}, // Zero address
+		To:   &zeroAddr,  // Zero address (not nil - genesis is not a contract creation)
+	})
+
+	// Create a synthetic call to hold the changes
+	// The CALL from zero address to zero address represents the genesis allocation
+	// depth=0, type=CALL(0xf1), from=zero, to=zero, input=nil, gas=0, value=nil
+	t.OnCallEnter(0, byte(CallTypeCall), [20]byte{}, [20]byte{}, nil, 0, nil)
+
+	// Process genesis allocation in deterministic order (sorted by address)
+	for _, addr := range sortedGenesisAddresses(alloc) {
+		account := alloc[addr]
+
+		// Balance change (if non-zero)
+		if account.Balance != nil && account.Balance.Sign() != 0 {
+			t.OnBalanceChange(addr, bigZero, account.Balance, pbeth.BalanceChange_REASON_GENESIS_BALANCE)
+		}
+
+		// Code change (if code exists)
+		if len(account.Code) > 0 {
+			codeHash := hashBytes(account.Code)
+			t.OnCodeChange(addr, EmptyHash, codeHash, nil, account.Code)
+		}
+
+		// Nonce change (if non-zero)
+		if account.Nonce > 0 {
+			t.OnNonceChange(addr, 0, account.Nonce)
+		}
+
+		// Storage changes (sorted by key for determinism)
+		for _, key := range sortedStorageKeys(account.Storage) {
+			value := account.Storage[key]
+			t.OnStorageChange(addr, key, EmptyHash, value)
+		}
+	}
+
+	// End the synthetic call (output=nil, gasUsed=0, err=nil)
+	t.OnCallExit(nil, 0, nil)
+
+	// End the synthetic transaction with a successful receipt
+	t.OnTxEnd(&ReceiptData{
+		TransactionIndex:  0,
+		Status:            1, // Success
+		GasUsed:           0,
+		CumulativeGasUsed: 0,
+		Logs:              nil,
+	}, nil)
+
+	// End the block
 	t.OnBlockEnd(nil)
-	t.blockIsGenesis = false
+}
+
+// sortedGenesisAddresses returns genesis allocation addresses in deterministic sorted order
+// Sorting is done by comparing address bytes to ensure consistent ordering across runs
+func sortedGenesisAddresses(alloc GenesisAlloc) [][20]byte {
+	addresses := make([][20]byte, 0, len(alloc))
+	for addr := range alloc {
+		addresses = append(addresses, addr)
+	}
+
+	slices.SortFunc(addresses, func(a, b [20]byte) int {
+		return bytes.Compare(a[:], b[:])
+	})
+
+	return addresses
+}
+
+// sortedStorageKeys returns storage keys in deterministic sorted order
+// Sorting is done by comparing key bytes to ensure consistent ordering across runs
+func sortedStorageKeys(storage map[[32]byte][32]byte) [][32]byte {
+	keys := make([][32]byte, 0, len(storage))
+	for key := range storage {
+		keys = append(keys, key)
+	}
+
+	slices.SortFunc(keys, func(a, b [32]byte) int {
+		return bytes.Compare(a[:], b[:])
+	})
+
+	return keys
 }
 
 // OnBlockStart is called at the beginning of block processing
