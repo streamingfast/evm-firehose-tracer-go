@@ -16,7 +16,7 @@ func TestTracer_ExecutedCode(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			OpCode(0, 0x60, 21000, 3). // Execute a PUSH opcode
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -33,10 +33,10 @@ func TestTracer_ExecutedCode(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, CharlieAddr, bigInt(0), 100000, []byte{0x01}).
 			OpCode(0, 0x60, 100000, 3).
-			StartStaticCall(1, CharlieAddr, BobAddr, 50000, []byte{0x02}).
+			StartStaticCall(CharlieAddr, BobAddr, 50000, []byte{0x02}).
 			OpCode(0, 0x60, 50000, 3).
-			EndCall([]byte{}, 45000, nil).
-			EndCall([]byte{}, 95000, nil).
+			EndCall([]byte{}, 45000).
+			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -53,10 +53,10 @@ func TestTracer_ExecutedCode(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, CharlieAddr, bigInt(0), 100000, []byte{0x01}).
 			OpCode(0, 0x60, 100000, 3).
-			StartDelegateCall(1, CharlieAddr, BobAddr, bigInt(0), 50000, []byte{0x02}).
+			StartDelegateCall(CharlieAddr, BobAddr, bigInt(0), 50000, []byte{0x02}).
 			OpCode(0, 0x60, 50000, 3).
-			EndCall([]byte{}, 45000, nil).
-			EndCall([]byte{}, 95000, nil).
+			EndCall([]byte{}, 45000).
+			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -75,7 +75,7 @@ func TestTracer_ExecutedCode(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, BobAddr, bigInt(0), 53000, contractCode).
 			OpCode(0, 0x60, 53000, 3).
-			EndCall(contractCode, 50000, nil).
+			EndCall(contractCode, 50000).
 			EndBlockTrx(successReceipt(53000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

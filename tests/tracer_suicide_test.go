@@ -21,7 +21,7 @@ func TestTracer_Suicide(t *testing.T) {
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob (contract) self-destructs, sending balance to Charlie
 			Suicide(BobAddr, CharlieAddr, contractBalance).
-			EndCall([]byte{}, 50000, nil).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -60,7 +60,7 @@ func TestTracer_Suicide(t *testing.T) {
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob self-destructs to itself
 			Suicide(BobAddr, BobAddr, contractBalance).
-			EndCall([]byte{}, 50000, nil).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -93,7 +93,7 @@ func TestTracer_Suicide(t *testing.T) {
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob has zero balance
 			Suicide(BobAddr, CharlieAddr, bigInt(0)).
-			EndCall([]byte{}, 50000, nil).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -127,11 +127,11 @@ func TestTracer_Suicide(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			// Bob calls Charlie
-			StartCall(1, BobAddr, CharlieAddr, bigInt(0), 100000, []byte{}).
+			StartCall(BobAddr, CharlieAddr, bigInt(0), 100000, []byte{}).
 			// Charlie self-destructs
 			Suicide(CharlieAddr, MinerAddr, contractBalance).
-			EndCall([]byte{}, 50000, nil).  // Charlie returns
-			EndCall([]byte{}, 150000, nil). // Bob returns
+			EndCall([]byte{}, 50000).  // Charlie returns
+			EndCall([]byte{}, 150000). // Bob returns
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -171,11 +171,11 @@ func TestTracer_Suicide(t *testing.T) {
 			// First suicide: Bob → Charlie
 			Suicide(BobAddr, CharlieAddr, balance1).
 			// Bob calls Miner
-			StartCall(1, BobAddr, MinerAddr, bigInt(0), 100000, []byte{}).
+			StartCall(BobAddr, MinerAddr, bigInt(0), 100000, []byte{}).
 			// Second suicide: Miner → Alice
 			Suicide(MinerAddr, AliceAddr, balance2).
-			EndCall([]byte{}, 50000, nil).  // Miner returns
-			EndCall([]byte{}, 250000, nil). // Bob returns
+			EndCall([]byte{}, 50000).  // Miner returns
+			EndCall([]byte{}, 250000). // Bob returns
 			EndBlockTrx(successReceipt(300000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -212,7 +212,7 @@ func TestTracer_Suicide(t *testing.T) {
 			Log(BobAddr, [][32]byte{hash32(100)}, []byte{0x01, 0x02}, 0).
 			// Then suicide
 			Suicide(BobAddr, CharlieAddr, contractBalance).
-			EndCall([]byte{}, 150000, nil).
+			EndCall([]byte{}, 150000).
 			EndBlockTrx(receiptWithLogs(200000, []firehose.LogData{
 				{Address: BobAddr, Topics: [][32]byte{hash32(100)}, Data: []byte{0x01, 0x02}},
 			}), nil, nil).
@@ -246,7 +246,7 @@ func TestTracer_Suicide(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Suicide(BobAddr, CharlieAddr, contractBalance).
-			EndCall([]byte{}, 50000, nil).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

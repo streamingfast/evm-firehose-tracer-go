@@ -15,7 +15,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 5, 6).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -36,7 +36,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 			// Nonce change BEFORE call starts
 			NonceChange(AliceAddr, 5, 6).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -59,7 +59,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 			NonceChange(AliceAddr, 5, 6).
 			NonceChange(BobAddr, 10, 11).
 			NonceChange(AliceAddr, 6, 7).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -92,7 +92,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 0, 1).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

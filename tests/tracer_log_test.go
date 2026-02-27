@@ -20,7 +20,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: data},
 			}), nil, nil).
@@ -47,7 +47,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: data},
 			}), nil, nil).
@@ -71,7 +71,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: data},
 			}), nil, nil).
@@ -96,7 +96,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: data},
 			}), nil, nil).
@@ -122,7 +122,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: data},
 			}), nil, nil).
@@ -155,7 +155,7 @@ func TestTracer_OnLog(t *testing.T) {
 			Log(BobAddr, topics1, data1, 0).
 			Log(BobAddr, topics2, data2, 1).
 			Log(BobAddr, topics3, data3, 2).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics1, Data: data1},
 				{Address: BobAddr, Topics: topics2, Data: data2},
@@ -189,10 +189,10 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			Log(BobAddr, topics1, data1, 0).
-			StartCallRaw(1, byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
+			StartCallRaw(byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
 			Log(CharlieAddr, topics2, data2, 1).
-			EndCall([]byte{}, 90000, nil).
-			EndCall([]byte{}, 180000, nil).
+			EndCall([]byte{}, 90000).
+			EndCall([]byte{}, 180000).
 			EndBlockTrx(receiptWithLogs(200000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics1, Data: data1},
 				{Address: CharlieAddr, Topics: topics2, Data: data2},
@@ -221,7 +221,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, emptyData, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: emptyData},
 			}), nil, nil).
@@ -248,7 +248,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, largeData, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: largeData},
 			}), nil, nil).
@@ -274,7 +274,7 @@ func TestTracer_OnLog(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: BobAddr, Topics: topics, Data: data},
 			}), nil, nil).

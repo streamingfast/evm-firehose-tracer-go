@@ -21,7 +21,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -39,7 +39,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			// Balance change AFTER call ends but before transaction ends
 			BalanceChange(AliceAddr, bigInt(790), bigInt(800), pbeth.BalanceChange_REASON_GAS_REFUND).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -68,7 +68,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			// DURING: Transfer
 			BalanceChange(AliceAddr, bigInt(790), bigInt(690), pbeth.BalanceChange_REASON_TRANSFER).
 			BalanceChange(BobAddr, bigInt(500), bigInt(600), pbeth.BalanceChange_REASON_TRANSFER).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			// AFTER: Gas refund
 			BalanceChange(AliceAddr, bigInt(690), bigInt(700), pbeth.BalanceChange_REASON_GAS_REFUND).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -106,7 +106,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			NonceChange(AliceAddr, 0, 1).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -125,7 +125,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			NonceChange(AliceAddr, 5, 6).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -149,7 +149,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			// DURING: Contract creation increments nonce
 			NonceChange(BobAddr, 0, 1).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			// AFTER: Some post-execution nonce change
 			NonceChange(CharlieAddr, 10, 11).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -184,7 +184,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -205,7 +205,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			CodeChange(CharlieAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -236,7 +236,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			// DURING: Contract deployment
 			CodeChange(BobAddr, hashBytes(code2Old), hashBytes(code2New), code2Old, code2New).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			// AFTER: Another code change
 			CodeChange(CharlieAddr, hashBytes(code3Old), hashBytes(code3New), code3Old, code3New).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -267,7 +267,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			GasChange(21000, 0, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -286,7 +286,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			GasChange(0, 5000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -310,7 +310,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 50000, []byte{}).
 			// DURING: Call execution (using STATE_COLD_ACCESS as example of gas consumed during call)
 			GasChange(29000, 8000, pbeth.GasChange_REASON_STATE_COLD_ACCESS).
-			EndCall([]byte{}, 8000, nil).
+			EndCall([]byte{}, 8000).
 			// AFTER: Gas refund
 			GasChange(8000, 13000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
 			EndBlockTrx(successReceipt(37000), nil, nil).
@@ -347,7 +347,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			CodeChange(AliceAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
 			GasChange(50000, 29000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 29000, []byte{}).
-			EndCall([]byte{}, 29000, nil).
+			EndCall([]byte{}, 29000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -369,7 +369,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			BalanceChange(AliceAddr, bigInt(790), bigInt(800), pbeth.BalanceChange_REASON_GAS_REFUND).
 			NonceChange(CharlieAddr, 5, 6).
 			CodeChange(CharlieAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
@@ -410,7 +410,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			NonceChange(BobAddr, 0, 1).
 			CodeChange(BobAddr, hashBytes(code2Old), hashBytes(code2New), code2Old, code2New).
 			GasChange(29000, 8000, pbeth.GasChange_REASON_STATE_COLD_ACCESS).
-			EndCall([]byte{}, 8000, nil).
+			EndCall([]byte{}, 8000).
 			// === AFTER ROOT CALL ===
 			BalanceChange(AliceAddr, bigInt(690), bigInt(700), pbeth.BalanceChange_REASON_GAS_REFUND).
 			NonceChange(CharlieAddr, 10, 11).

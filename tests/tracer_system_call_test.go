@@ -31,7 +31,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			// Then regular transaction
 			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				// Verify system call was recorded
@@ -70,7 +70,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			).
 			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.SystemCalls))
@@ -108,7 +108,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			// Then transaction
 			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 2, len(block.SystemCalls), "Should have 2 system calls")
@@ -139,14 +139,14 @@ func TestTracer_SystemCall(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			StartSystemCall().
-			StartCallRaw(0, byte(firehose.CallTypeCall), SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, bigInt(0)).
+			StartCallRaw(byte(firehose.CallTypeCall), SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, bigInt(0)).
 			// System call modifies storage
 			StorageChange(BeaconRootsAddress, storageKey, zeroVal, storageValue).
-			EndCall([]byte{}, 50_000, nil).
+			EndCall([]byte{}, 50_000).
 			EndSystemCall().
 			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.SystemCalls))
@@ -170,12 +170,12 @@ func TestTracer_SystemCall(t *testing.T) {
 			// First transaction
 			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Second transaction
 			StartTrx(TestLegacyTrx).
 			StartRootCall(CharlieAddr, MinerAddr, bigInt(200), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.SystemCalls))
@@ -198,7 +198,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
 			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				sysCall := block.SystemCalls[0]
@@ -242,7 +242,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			// Transaction
 			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Second system call
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot2[:], 30_000_000, []byte{}, 50_000).

@@ -20,7 +20,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, oldVal, newVal).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -46,7 +46,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 			StorageChange(BobAddr, key1, hash32(100), hash32(200)).
 			StorageChange(BobAddr, key2, hash32(300), hash32(400)).
 			StorageChange(BobAddr, key3, hash32(500), hash32(600)).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -74,11 +74,11 @@ func TestTracer_OnStorageChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			StorageChange(BobAddr, key1, hash32(100), hash32(200)).
-			StartCallRaw(1, byte(firehose.CallTypeCall), BobAddr, AliceAddr, []byte{}, 50000, bigInt(0)).
+			StartCallRaw(byte(firehose.CallTypeCall), BobAddr, AliceAddr, []byte{}, 50000, bigInt(0)).
 			StorageChange(AliceAddr, key10, hash32(1000), hash32(2000)).
-			EndCall([]byte{}, 50000, nil).
+			EndCall([]byte{}, 50000).
 			StorageChange(BobAddr, key2, hash32(300), hash32(400)).
-			EndCall([]byte{}, 100000, nil).
+			EndCall([]byte{}, 100000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -110,7 +110,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, oldVal, newVal).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -138,7 +138,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 			StorageChange(BobAddr, key1, zero, val100).
 			// Delete: non-zero -> zero
 			StorageChange(BobAddr, key2, val200, zero).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -168,7 +168,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, value, value). // No actual change
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

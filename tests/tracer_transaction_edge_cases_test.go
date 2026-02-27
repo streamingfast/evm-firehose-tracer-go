@@ -44,7 +44,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCall([]byte{0x42}, 95000, nil).
+			EndCall([]byte{0x42}, 95000).
 			EndBlockTrx(nil, nil, nil). // No receipt
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -74,7 +74,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCallReverted([]byte("error"), 95000, "execution reverted").
+			EndCallFailed([]byte("error"), 95000, testErrExecutionReverted, true).
 			EndBlockTrx(nil, nil, nil). // No receipt
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -99,7 +99,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCall(returnData, 95000, nil).
+			EndCall(returnData, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -119,7 +119,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCall([]byte{}, 95000, nil). // Empty return data
+			EndCall([]byte{}, 95000). // Empty return data
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -134,7 +134,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCall(nil, 95000, nil). // Nil return data
+			EndCall(nil, 95000). // Nil return data
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -152,7 +152,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCallReverted([]byte("error"), 95000, "execution reverted").
+			EndCallFailed([]byte("error"), 95000, testErrExecutionReverted, true).
 			EndBlockTrx(failedReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -172,7 +172,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{0x01}).
-			EndCall([]byte{}, 45000, nil).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -208,7 +208,7 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 		tester.Tracer.GetTestingTransaction().Type = pbeth.TransactionTrace_TRX_TYPE_BLOB
 
 		tester.StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCall([]byte{}, 95000, nil).
+			EndCall([]byte{}, 95000).
 			EndBlockTrx(receipt, nil, nil)
 
 		// Parse the block output (skip native validator comparison since we manually set the type)
@@ -233,7 +233,7 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
-			EndCall([]byte{}, 95000, nil).
+			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	firehose "github.com/streamingfast/evm-firehose-tracer-go"
@@ -15,7 +17,7 @@ func TestTracer_CallTypes(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.TransactionTraces))
@@ -40,9 +42,9 @@ func TestTracer_CallTypes(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 50000, []byte{}).
 			// Bob makes a STATICCALL to Charlie
-			StartStaticCall(1, BobAddr, CharlieAddr, 21000, []byte{0x01, 0x02}).
-			EndCall([]byte{0x03, 0x04}, 20000, nil).
-			EndCall([]byte{}, 45000, nil).
+			StartStaticCall(BobAddr, CharlieAddr, 21000, []byte{0x01, 0x02}).
+			EndCall([]byte{0x03, 0x04}, 20000).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -62,9 +64,9 @@ func TestTracer_CallTypes(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 50000, []byte{}).
 			// Bob makes a DELEGATECALL to Charlie
-			StartDelegateCall(1, BobAddr, CharlieAddr, bigInt(0), 21000, []byte{0x05}).
-			EndCall([]byte{0x06}, 20000, nil).
-			EndCall([]byte{}, 45000, nil).
+			StartDelegateCall(BobAddr, CharlieAddr, bigInt(0), 21000, []byte{0x05}).
+			EndCall([]byte{0x06}, 20000).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -82,9 +84,9 @@ func TestTracer_CallTypes(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 50000, []byte{}).
 			// Bob makes a CALLCODE to Charlie
-			StartCallCode(1, BobAddr, CharlieAddr, bigInt(50), 21000, []byte{}).
-			EndCall([]byte{}, 20000, nil).
-			EndCall([]byte{}, 45000, nil).
+			StartCallCode(BobAddr, CharlieAddr, bigInt(50), 21000, []byte{}).
+			EndCall([]byte{}, 20000).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -101,7 +103,7 @@ func TestTracer_CallTypes(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, BobAddr, bigInt(0), 53000, contractCode).
-			EndCall(contractCode, 50000, nil).
+			EndCall(contractCode, 50000).
 			EndBlockTrx(successReceipt(53000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -121,9 +123,9 @@ func TestTracer_CallTypes(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			// Bob deploys a contract using CREATE2
-			StartCreate2Call(1, BobAddr, CharlieAddr, bigInt(0), 53000, contractCode).
-			EndCall(contractCode, 50000, nil).
-			EndCall([]byte{}, 95000, nil).
+			StartCreate2Call(BobAddr, CharlieAddr, bigInt(0), 53000, contractCode).
+			EndCall(contractCode, 50000).
+			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -140,11 +142,10 @@ func TestTracer_CallTypes(t *testing.T) {
 // TestTracer_CallFailures tests different failure scenarios
 func TestTracer_CallFailures(t *testing.T) {
 	t.Run("reverted_call", func(t *testing.T) {
-		revertReason := "execution reverted"
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCallReverted([]byte{}, 5000, revertReason).
+			EndCallFailed([]byte{}, 5000, fmt.Errorf("revert: %w", testErrExecutionReverted), true).
 			EndBlockTrx(failedReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -152,7 +153,7 @@ func TestTracer_CallFailures(t *testing.T) {
 
 				assert.True(t, call.StatusFailed, "Call should be marked as failed")
 				assert.True(t, call.StatusReverted, "Call should be marked as reverted")
-				assert.Equal(t, revertReason, call.FailureReason)
+				assert.Equal(t, "revert: execution reverted", call.FailureReason)
 				assert.Equal(t, uint64(5000), call.GasConsumed)
 			})
 	})
@@ -161,7 +162,7 @@ func TestTracer_CallFailures(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCallFailed([]byte{}, 21000, "out of gas").
+			EndCallFailed([]byte{}, 21000, errors.New("out of gas"), true).
 			EndBlockTrx(failedReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -178,7 +179,7 @@ func TestTracer_CallFailures(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{0xff}).
-			EndCallFailed([]byte{}, 10000, "invalid opcode").
+			EndCallFailed([]byte{}, 10000, errors.New("invalid opcode"), true).
 			EndBlockTrx(failedReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -186,6 +187,42 @@ func TestTracer_CallFailures(t *testing.T) {
 
 				assert.True(t, call.StatusFailed)
 				assert.Equal(t, "invalid opcode", call.FailureReason)
+			})
+	})
+
+	t.Run("pre_homestead_code_store_out_of_gas", func(t *testing.T) {
+		// Pre-Homestead quirk: ErrCodeStoreOutOfGas with reverted=false
+		// This matches go-ethereum's behavior in core/vm/evm.go:
+		//   if !evm.chainRules.IsHomestead && errors.Is(err, ErrCodeStoreOutOfGas) {
+		//       reverted = false
+		//   }
+		// In Frontier (pre-Homestead), code storage running out of gas was not treated
+		// as a state revert - the call returns an error but reverted=false means no state rollback.
+		// Reference: https://github.com/ethereum/go-ethereum/blob/master/core/vm/evm.go
+		//
+		// Since reverted=false, the Firehose model treats this as a successful call:
+		// - StatusFailed: false (no state revert)
+		// - StatusReverted: false (no revert)
+		// - StateReverted: false (state is kept)
+		// - FailureReason: empty (no failure from Firehose perspective)
+		NewTracerTester(t).
+			StartBlockTrx(TestLegacyTrx).
+			StartRootCreateCall(AliceAddr, BobAddr, bigInt(0), 53000, []byte{0x60, 0x80}).
+			// Contract deployment fails at EVM level but reverted=false means state is kept
+			EndCallFailed([]byte{}, 0, testErrCodeStoreOutOfGas, false).
+			EndBlockTrx(successReceipt(53000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				call := trx.Calls[0]
+
+				// In Firehose model, reverted=false means successful state transition
+				assert.False(t, call.StatusFailed, "reverted=false means no state failure")
+				assert.False(t, call.StatusReverted, "reverted=false means no revert")
+				assert.False(t, call.StateReverted, "State is NOT reverted in pre-Homestead")
+				assert.Equal(t, "", call.FailureReason, "No failure reason when reverted=false")
+
+				// Gas consumption
+				assert.Equal(t, uint64(0), call.GasConsumed, "Code store OOG consumes no gas")
 			})
 	})
 }
@@ -198,9 +235,9 @@ func TestTracer_NestedCalls(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{0x01}).
 			// Bob makes a nested call to Charlie
-			StartCall(1, BobAddr, CharlieAddr, bigInt(50), 50000, []byte{0x02}).
-			EndCall([]byte{0x03}, 45000, nil). // Charlie returns
-			EndCall([]byte{0x04}, 90000, nil). // Bob returns
+			StartCall(BobAddr, CharlieAddr, bigInt(50), 50000, []byte{0x02}).
+			EndCall([]byte{0x03}, 45000). // Charlie returns
+			EndCall([]byte{0x04}, 90000). // Bob returns
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -227,11 +264,11 @@ func TestTracer_NestedCalls(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 200000, []byte{}).
-			StartCall(1, BobAddr, CharlieAddr, bigInt(50), 150000, []byte{}).
-			StartCall(2, CharlieAddr, MinerAddr, bigInt(25), 100000, []byte{}).
-			EndCall([]byte{}, 95000, nil).  // Miner returns
-			EndCall([]byte{}, 140000, nil). // Charlie returns
-			EndCall([]byte{}, 180000, nil). // Bob returns
+			StartCall(BobAddr, CharlieAddr, bigInt(50), 150000, []byte{}).
+			StartCall(CharlieAddr, MinerAddr, bigInt(25), 100000, []byte{}).
+			EndCall([]byte{}, 95000).  // Miner returns
+			EndCall([]byte{}, 140000). // Charlie returns
+			EndCall([]byte{}, 180000). // Bob returns
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -255,10 +292,10 @@ func TestTracer_NestedCalls(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			// Bob calls Charlie, which reverts
-			StartCall(1, BobAddr, CharlieAddr, bigInt(50), 50000, []byte{}).
-			EndCallReverted([]byte{}, 10000, "revert").
+			StartCall(BobAddr, CharlieAddr, bigInt(50), 50000, []byte{}).
+			EndCallFailed([]byte{}, 10000, fmt.Errorf("revert: %w", testErrExecutionReverted), true).
 			// Bob continues and succeeds
-			EndCall([]byte{0x05}, 80000, nil).
+			EndCall([]byte{0x05}, 80000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -271,7 +308,7 @@ func TestTracer_NestedCalls(t *testing.T) {
 				nestedCall := trx.Calls[1]
 				assert.True(t, nestedCall.StatusFailed, "Nested call should fail")
 				assert.True(t, nestedCall.StatusReverted)
-				assert.Equal(t, "revert", nestedCall.FailureReason)
+				assert.Equal(t, "revert: execution reverted", nestedCall.FailureReason)
 			})
 	})
 
@@ -281,10 +318,10 @@ func TestTracer_NestedCalls(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			// Bob calls Charlie, which reverts
-			StartCall(1, BobAddr, CharlieAddr, bigInt(50), 50000, []byte{}).
-			EndCallReverted([]byte{}, 10000, "nested revert").
+			StartCall(BobAddr, CharlieAddr, bigInt(50), 50000, []byte{}).
+			EndCallFailed([]byte{}, 10000, fmt.Errorf("nested revert: %w", testErrExecutionReverted), true).
 			// Bob also reverts
-			EndCallReverted([]byte{}, 20000, "parent revert").
+			EndCallFailed([]byte{}, 20000, fmt.Errorf("parent revert: %w", testErrExecutionReverted), true).
 			EndBlockTrx(failedReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -307,12 +344,12 @@ func TestTracer_NestedCalls(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 200000, []byte{}).
 			// First sibling: Bob calls Charlie
-			StartCall(1, BobAddr, CharlieAddr, bigInt(30), 80000, []byte{}).
-			EndCall([]byte{0x01}, 75000, nil).
+			StartCall(BobAddr, CharlieAddr, bigInt(30), 80000, []byte{}).
+			EndCall([]byte{0x01}, 75000).
 			// Second sibling: Bob calls Miner
-			StartCall(1, BobAddr, MinerAddr, bigInt(20), 80000, []byte{}).
-			EndCall([]byte{0x02}, 75000, nil).
-			EndCall([]byte{0x03}, 150000, nil). // Bob returns
+			StartCall(BobAddr, MinerAddr, bigInt(20), 80000, []byte{}).
+			EndCall([]byte{0x02}, 75000).
+			EndCall([]byte{0x03}, 150000). // Bob returns
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -345,7 +382,7 @@ func TestTracer_CallDataAndGas(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, largeInput).
-			EndCall([]byte{0x01}, 45000, nil).
+			EndCall([]byte{0x01}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -366,7 +403,7 @@ func TestTracer_CallDataAndGas(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
-			EndCall(largeOutput, 95000, nil).
+			EndCall(largeOutput, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -380,7 +417,7 @@ func TestTracer_CallDataAndGas(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
-			EndCall([]byte{}, 20000, nil).
+			EndCall([]byte{}, 20000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -395,7 +432,7 @@ func TestTracer_CallDataAndGas(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil). // All gas consumed
+			EndCall([]byte{}, 21000). // All gas consumed
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -413,9 +450,9 @@ func TestTracer_MixedCallTypes(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			// Bob makes a STATICCALL to Charlie
-			StartCallRaw(1, byte(firehose.CallTypeStaticCall), BobAddr, CharlieAddr, []byte{}, 50000, bigInt(0)).
-			EndCall([]byte{0x01}, 45000, nil).
-			EndCall([]byte{0x02}, 90000, nil).
+			StartCallRaw(byte(firehose.CallTypeStaticCall), BobAddr, CharlieAddr, []byte{}, 50000, bigInt(0)).
+			EndCall([]byte{0x01}, 45000).
+			EndCall([]byte{0x02}, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -431,9 +468,9 @@ func TestTracer_MixedCallTypes(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			// Bob makes a DELEGATECALL to Charlie
-			StartCallRaw(1, byte(firehose.CallTypeDelegateCall), BobAddr, CharlieAddr, []byte{}, 50000, bigInt(0)).
-			EndCall([]byte{0x01}, 45000, nil).
-			EndCall([]byte{0x02}, 90000, nil).
+			StartCallRaw(byte(firehose.CallTypeDelegateCall), BobAddr, CharlieAddr, []byte{}, 50000, bigInt(0)).
+			EndCall([]byte{0x01}, 45000).
+			EndCall([]byte{0x02}, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -450,9 +487,9 @@ func TestTracer_MixedCallTypes(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, BobAddr, bigInt(0), 100000, contractCode).
 			// New contract makes a call to Charlie
-			StartCall(1, BobAddr, CharlieAddr, bigInt(0), 50000, []byte{}).
-			EndCall([]byte{0x01}, 45000, nil).
-			EndCall(contractCode, 90000, nil).
+			StartCall(BobAddr, CharlieAddr, bigInt(0), 50000, []byte{}).
+			EndCall([]byte{0x01}, 45000).
+			EndCall(contractCode, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -471,10 +508,7 @@ func TestTracer_WrappedErrors(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 5000, &wrapError{
-				reason:  "custom context: execution failed",
-				wrapped: testErrExecutionReverted,
-			}).
+			EndCallFailed([]byte{}, 5000, fmt.Errorf("custom context: %w", testErrExecutionReverted), true).
 			EndBlockTrx(failedReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -482,7 +516,7 @@ func TestTracer_WrappedErrors(t *testing.T) {
 
 				assert.True(t, call.StatusFailed, "Call should be marked as failed")
 				assert.True(t, call.StatusReverted, "Call should be marked as reverted even with wrapped error")
-				assert.Equal(t, "custom context: execution failed", call.FailureReason)
+				assert.Equal(t, "custom context: execution reverted", call.FailureReason)
 			})
 	})
 
@@ -491,10 +525,7 @@ func TestTracer_WrappedErrors(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 0, &wrapError{
-				reason:  "transfer failed: not enough funds",
-				wrapped: testErrInsufficientBalanceTransfer,
-			}).
+			EndCallFailed([]byte{}, 0, fmt.Errorf("transfer failed: %w", testErrInsufficientBalanceTransfer), true).
 			EndBlockTrx(failedReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -502,25 +533,15 @@ func TestTracer_WrappedErrors(t *testing.T) {
 
 				assert.True(t, call.StatusFailed)
 				assert.True(t, call.StatusReverted, "Insufficient balance should be reverted")
-				assert.Equal(t, "transfer failed: not enough funds", call.FailureReason)
+				assert.Equal(t, "transfer failed: insufficient balance for transfer", call.FailureReason)
 			})
 	})
 
 	t.Run("double_wrapped_error", func(t *testing.T) {
-		// Test double-wrapped error chain
-		wrappedOnce := &wrapError{
-			reason:  "context layer 1",
-			wrapped: testErrMaxCallDepth,
-		}
-		wrappedTwice := &wrapError{
-			reason:  "context layer 2",
-			wrapped: wrappedOnce,
-		}
-
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 0, wrappedTwice).
+			EndCallFailed([]byte{}, 0, fmt.Errorf("context layer 2: %w", fmt.Errorf("context layer 1: %w", testErrMaxCallDepth)), true).
 			EndBlockTrx(failedReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -528,7 +549,7 @@ func TestTracer_WrappedErrors(t *testing.T) {
 
 				assert.True(t, call.StatusFailed)
 				assert.True(t, call.StatusReverted, "Should find revert error through multiple wrapping layers")
-				assert.Equal(t, "context layer 2", call.FailureReason)
+				assert.Equal(t, "context layer 2: context layer 1: max call depth exceeded", call.FailureReason)
 			})
 	})
 }
@@ -551,9 +572,9 @@ func TestTracer_Precompiles(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
 			// Contract calls ecrecover precompile
-			StartStaticCall(1, BobAddr, ecrecoverAddr, 5000, input).
-			EndCall(output, 4500, nil).
-			EndCall([]byte{}, 45000, nil).
+			StartStaticCall(BobAddr, ecrecoverAddr, 5000, input).
+			EndCall(output, 4500).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -575,9 +596,9 @@ func TestTracer_Precompiles(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
-			StartStaticCall(1, BobAddr, sha256Addr, 5000, input).
-			EndCall(output, 4800, nil).
-			EndCall([]byte{}, 45000, nil).
+			StartStaticCall(BobAddr, sha256Addr, 5000, input).
+			EndCall(output, 4800).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -594,9 +615,9 @@ func TestTracer_Precompiles(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
-			StartStaticCall(1, BobAddr, ripemd160Addr, 5000, input).
-			EndCall(output, 4900, nil).
-			EndCall([]byte{}, 45000, nil).
+			StartStaticCall(BobAddr, ripemd160Addr, 5000, input).
+			EndCall(output, 4900).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -614,9 +635,9 @@ func TestTracer_Precompiles(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
-			StartStaticCall(1, BobAddr, bn256AddAddr, 10000, input).
-			EndCall(output, 9500, nil).
-			EndCall([]byte{}, 40000, nil).
+			StartStaticCall(BobAddr, bn256AddAddr, 10000, input).
+			EndCall(output, 9500).
+			EndCall([]byte{}, 40000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -634,9 +655,9 @@ func TestTracer_Precompiles(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
-			StartStaticCall(1, BobAddr, bn256ScalarMulAddr, 10000, input).
-			EndCall(output, 9000, nil).
-			EndCall([]byte{}, 40000, nil).
+			StartStaticCall(BobAddr, bn256ScalarMulAddr, 10000, input).
+			EndCall(output, 9000).
+			EndCall([]byte{}, 40000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -653,9 +674,9 @@ func TestTracer_Precompiles(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{}).
-			StartStaticCall(1, BobAddr, bn256ScalarMulAddr, 10000, invalidInput).
-			EndCall([]byte{}, 0, testErrInvalidInput).
-			EndCall([]byte{}, 40000, nil).
+			StartStaticCall(BobAddr, bn256ScalarMulAddr, 10000, invalidInput).
+			EndCallFailed([]byte{}, 0, errors.New("invalid input"), true).
+			EndCall([]byte{}, 40000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -677,12 +698,12 @@ func TestTracer_Precompiles(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 80000, []byte{}).
 			// First precompile: sha256
-			StartStaticCall(1, BobAddr, sha256Addr, 5000, sha256Input).
-			EndCall(sha256Output, 4800, nil).
+			StartStaticCall(BobAddr, sha256Addr, 5000, sha256Input).
+			EndCall(sha256Output, 4800).
 			// Second precompile: ecrecover
-			StartStaticCall(1, BobAddr, ecrecoverAddr, 5000, ecrecoverInput).
-			EndCall(ecrecoverOutput, 4500, nil).
-			EndCall([]byte{}, 70000, nil).
+			StartStaticCall(BobAddr, ecrecoverAddr, 5000, ecrecoverInput).
+			EndCall(ecrecoverOutput, 4500).
+			EndCall([]byte{}, 70000).
 			EndBlockTrx(successReceipt(80000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -704,12 +725,12 @@ func TestTracer_Precompiles(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 80000, []byte{}).
 			// Bob calls Charlie
-			StartCall(1, BobAddr, CharlieAddr, bigInt(0), 40000, []byte{}).
+			StartCall(BobAddr, CharlieAddr, bigInt(0), 40000, []byte{}).
 			// Charlie calls sha256 precompile
-			StartStaticCall(2, CharlieAddr, sha256Addr, 5000, input).
-			EndCall(output, 4800, nil).
-			EndCall([]byte{0x01}, 35000, nil).
-			EndCall([]byte{}, 45000, nil).
+			StartStaticCall(CharlieAddr, sha256Addr, 5000, input).
+			EndCall(output, 4800).
+			EndCall([]byte{0x01}, 35000).
+			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(80000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -733,12 +754,12 @@ func TestTracer_CREATE2EdgeCases(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			// First CREATE2 succeeds
-			StartCreate2Call(1, BobAddr, contractAddr, bigInt(0), 100000, []byte{0x60, 0x80}).
-			EndCall([]byte{0x60, 0x80}, 95000, nil).
+			StartCreate2Call(BobAddr, contractAddr, bigInt(0), 100000, []byte{0x60, 0x80}).
+			EndCall([]byte{0x60, 0x80}, 95000).
 			// Second CREATE2 to same address fails
-			StartCreate2Call(1, BobAddr, contractAddr, bigInt(0), 50000, []byte{0x60, 0x80}).
-			EndCall([]byte{}, 0, testErrExecutionReverted).
-			EndCall([]byte{}, 50000, nil).
+			StartCreate2Call(BobAddr, contractAddr, bigInt(0), 50000, []byte{0x60, 0x80}).
+			EndCallFailed([]byte{}, 0, testErrExecutionReverted, true).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -764,9 +785,9 @@ func TestTracer_CREATE2EdgeCases(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// CREATE2 with value larger than available balance
-			StartCreate2Call(1, BobAddr, contractAddr, largeValue, 50000, []byte{0x60, 0x80}).
-			EndCall([]byte{}, 0, testErrInsufficientBalanceTransfer).
-			EndCall([]byte{}, 50000, nil).
+			StartCreate2Call(BobAddr, contractAddr, largeValue, 50000, []byte{0x60, 0x80}).
+			EndCallFailed([]byte{}, 0, testErrInsufficientBalanceTransfer, true).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -788,13 +809,13 @@ func TestTracer_ConstructorEdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
-			StartCreateCall(1, BobAddr, contractAddr, bigInt(0), 80000, code).
+			StartCreateCall(BobAddr, contractAddr, bigInt(0), 80000, code).
 			// Constructor changes storage
 			StorageChange(contractAddr, hash32(1), hash32(0), hash32(100)).
 			// Constructor emits log
 			Log(contractAddr, [][32]byte{hash32(1)}, []byte{0xaa, 0xbb}, 0).
-			EndCall(code, 70000, nil).
-			EndCall([]byte{}, 30000, nil).
+			EndCall(code, 70000).
+			EndCall([]byte{}, 30000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
 				{Address: contractAddr, Topics: [][32]byte{hash32(1)}, Data: []byte{0xaa, 0xbb}},
 			}), nil, nil).
@@ -816,12 +837,12 @@ func TestTracer_ConstructorEdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
-			StartCreateCall(1, BobAddr, contractAddr, bigInt(0), 80000, code).
+			StartCreateCall(BobAddr, contractAddr, bigInt(0), 80000, code).
 			// Constructor tries to change storage (will be reverted)
 			StorageChange(contractAddr, hash32(1), hash32(0), hash32(100)).
 			// Constructor fails
-			EndCall([]byte{}, 0, testErrExecutionReverted).
-			EndCall([]byte{}, 20000, nil).
+			EndCallFailed([]byte{}, 0, testErrExecutionReverted, true).
+			EndCall([]byte{}, 20000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -844,14 +865,14 @@ func TestTracer_ConstructorEdgeCases(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			// First CREATE
-			StartCreateCall(1, BobAddr, firstContractAddr, bigInt(0), 150000, code).
+			StartCreateCall(BobAddr, firstContractAddr, bigInt(0), 150000, code).
 			// First constructor creates second contract
-			StartCreateCall(2, firstContractAddr, secondContractAddr, bigInt(0), 80000, code).
+			StartCreateCall(firstContractAddr, secondContractAddr, bigInt(0), 80000, code).
 			// Second constructor fails
-			EndCall([]byte{}, 0, testErrExecutionReverted).
+			EndCallFailed([]byte{}, 0, testErrExecutionReverted, true).
 			// First constructor also fails due to nested failure
-			EndCall([]byte{}, 0, testErrExecutionReverted).
-			EndCall([]byte{}, 50000, nil).
+			EndCallFailed([]byte{}, 0, testErrExecutionReverted, true).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -872,10 +893,10 @@ func TestTracer_ConstructorEdgeCases(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
-			StartCreateCall(1, BobAddr, contractAddr, bigInt(0), 50000, code).
+			StartCreateCall(BobAddr, contractAddr, bigInt(0), 50000, code).
 			// Constructor runs out of gas
-			EndCall([]byte{}, 0, testErrOutOfGas).
-			EndCall([]byte{}, 50000, nil).
+			EndCallFailed([]byte{}, 0, testErrOutOfGas, true).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

@@ -19,7 +19,7 @@ func TestTracer_CREATE_AddressCalculation(t *testing.T) {
 			SetMockStateNonce(AliceAddr, 0).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, AddrBytes(expectedAddr), bigInt(0), 53000, []byte{0x60, 0x80}).
-			EndCall([]byte{}, 50000, nil).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(53000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -38,7 +38,7 @@ func TestTracer_CREATE_AddressCalculation(t *testing.T) {
 			SetMockStateNonce(AliceAddr, 5).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, AddrBytes(expectedAddr), bigInt(0), 53000, []byte{0x60, 0x80}).
-			EndCall([]byte{}, 50000, nil).
+			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(53000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

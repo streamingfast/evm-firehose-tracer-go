@@ -31,7 +31,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 			CodeChange(BobAddr, prevHash, codeHash, nil, deployedCode).
 			// Gas consumption
 			GasChange(200000, 150000, pbeth.GasChange_REASON_CONTRACT_CREATION).
-			EndCall([]byte{}, 150000, nil).
+			EndCall([]byte{}, 150000).
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -72,7 +72,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 			CodeChange(BobAddr, prevHash, codeHash, nil, deployedCode).
 			StorageChange(BobAddr, storageKey, zeroVal, storageVal).
 			Log(BobAddr, logTopics, logData, 0).
-			EndCall([]byte{}, 180000, nil).
+			EndCall([]byte{}, 180000).
 			EndBlockTrx(receiptWithLogs(200000, []firehose.LogData{
 				{Address: BobAddr, Topics: logTopics, Data: logData},
 			}), nil, nil).
@@ -125,7 +125,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 			StorageChange(BobAddr, storageKey, zeroVal, storageVal).
 			GasChange(300000, 250000, pbeth.GasChange_REASON_CONTRACT_CREATION).
 			Log(BobAddr, logTopics, logData, 0).
-			EndCall([]byte{}, 250000, nil).
+			EndCall([]byte{}, 250000).
 			EndBlockTrx(receiptWithLogs(300000, []firehose.LogData{
 				{Address: BobAddr, Topics: logTopics, Data: logData},
 			}), nil, nil).
@@ -177,11 +177,11 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 			// Root call: balance change
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9900000), pbeth.BalanceChange_REASON_TRANSFER).
 			// Nested call
-			StartCallRaw(1, byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
+			StartCallRaw(byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
 			StorageChange(CharlieAddr, storageKey, zeroVal, storageVal).
 			Log(CharlieAddr, logTopics, logData, 0).
-			EndCall([]byte{}, 90000, nil).
-			EndCall([]byte{}, 280000, nil).
+			EndCall([]byte{}, 90000).
+			EndCall([]byte{}, 280000).
 			EndBlockTrx(receiptWithLogs(300000, []firehose.LogData{
 				{Address: CharlieAddr, Topics: logTopics, Data: logData},
 			}), nil, nil).

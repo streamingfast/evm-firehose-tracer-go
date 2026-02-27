@@ -19,7 +19,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, code).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -46,7 +46,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 			// Code change BEFORE call starts (EIP-7702 authorization)
 			CodeChange(AliceAddr, prevHash, codeHash, nil, code).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -92,7 +92,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, oldHash, newHash, oldCode, newCode).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -120,7 +120,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			CodeChange(CharlieAddr, prevHash, hash1, nil, code1).
 			CodeChange(BobAddr, prevHash, hash2, nil, code2).
-			EndCall([]byte{}, 180000, nil).
+			EndCall([]byte{}, 180000).
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -147,7 +147,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, code).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -176,7 +176,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, emptyCode).
-			EndCall([]byte{}, 90000, nil).
+			EndCall([]byte{}, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]

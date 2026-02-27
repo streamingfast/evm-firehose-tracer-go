@@ -16,7 +16,7 @@ func TestTracer_TxTypes(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.TransactionTraces), "Should have one transaction")
@@ -38,7 +38,7 @@ func TestTracer_TxTypes(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestAccessListTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.TransactionTraces), "Should have one transaction")
@@ -64,7 +64,7 @@ func TestTracer_TxTypes(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestDynamicFeeTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.TransactionTraces), "Should have one transaction")
@@ -94,7 +94,7 @@ func TestTracer_TxTypes(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestBlobTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.TransactionTraces), "Should have one transaction")
@@ -135,7 +135,7 @@ func TestTracer_TxTypes(t *testing.T) {
 
 		tester.
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				assert.Equal(t, 1, len(block.TransactionTraces), "Should have one transaction")

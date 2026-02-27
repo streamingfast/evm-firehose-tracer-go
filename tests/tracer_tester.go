@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
-	"errors"
 	"math/big"
 	"strconv"
 	"strings"
@@ -28,23 +27,8 @@ var (
 	testErrInsufficientBalanceTransfer = vm.ErrInsufficientBalance
 	testErrMaxCallDepth                = vm.ErrDepth
 	testErrOutOfGas                    = vm.ErrOutOfGas
-	testErrInvalidInput                = errors.New("invalid input")
+	testErrCodeStoreOutOfGas           = vm.ErrCodeStoreOutOfGas
 )
-
-// wrapError wraps an error with a custom reason message
-// The wrapped error is checked by errorIs in tracer.go
-type wrapError struct {
-	reason  string
-	wrapped error
-}
-
-func (e *wrapError) Error() string {
-	return e.reason
-}
-
-func (e *wrapError) Unwrap() error {
-	return e.wrapped
-}
 
 // TestBlock provides a standard test block with reasonable defaults
 // This block represents block #100 with typical Ethereum mainnet settings
@@ -166,6 +150,10 @@ type TracerTester struct {
 	// Mock state reader for providing blockchain state to the tracer
 	// Wraps the native validator's mockStateDB
 	stateReader firehose.StateReader
+
+	// Current call depth (0 = root call, 1 = first nested call, etc.)
+	// Automatically managed by StartCall*/EndCall methods
+	depth int
 }
 
 // NewTracerTester creates a new tester builder with native validator
@@ -264,48 +252,61 @@ func (s *TracerTester) StartTrx(tx firehose.TxEvent) *TracerTester {
 	return s
 }
 
-// StartCallRaw begins a call context with explicit depth and parameters
-// Use this for nested calls or when you need full control over call depth
-func (s *TracerTester) StartCallRaw(depth int, typ byte, from, to [20]byte, input []byte, gas uint64, value *big.Int) *TracerTester {
-	s.Tracer.OnCallEnter(depth, typ, from, to, input, gas, value)
+// StartCallRaw begins a call context
+// Automatically manages depth: uses current depth, then increments for nested calls
+func (s *TracerTester) StartCallRaw(typ byte, from, to [20]byte, input []byte, gas uint64, value *big.Int) *TracerTester {
+	s.Tracer.OnCallEnter(s.depth, typ, from, to, input, gas, value)
+	s.depth++
 	return s
 }
 
 func (s *TracerTester) StartRootCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(0, byte(firehose.CallTypeCall), from, to, input, gas, value)
+	s.depth = 0 // Reset depth for root call
+	return s.StartCallRaw(byte(firehose.CallTypeCall), from, to, input, gas, value)
 }
 
 func (s *TracerTester) StartRootCreateCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(0, byte(firehose.CallTypeCreate), from, to, input, gas, value)
+	s.depth = 0 // Reset depth for root call
+	return s.StartCallRaw(byte(firehose.CallTypeCreate), from, to, input, gas, value)
 }
 
-func (s *TracerTester) StartCall(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(depth, byte(firehose.CallTypeCall), from, to, input, gas, value)
+func (s *TracerTester) StartCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(byte(firehose.CallTypeCall), from, to, input, gas, value)
 }
 
-func (s *TracerTester) StartStaticCall(depth int, from, to [20]byte, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(depth, byte(firehose.CallTypeStaticCall), from, to, input, gas, nil)
+func (s *TracerTester) StartStaticCall(from, to [20]byte, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(byte(firehose.CallTypeStaticCall), from, to, input, gas, nil)
 }
 
-func (s *TracerTester) StartCreateCall(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(depth, byte(firehose.CallTypeCreate), from, to, input, gas, value)
+func (s *TracerTester) StartCreateCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(byte(firehose.CallTypeCreate), from, to, input, gas, value)
 }
 
-func (s *TracerTester) StartCreate2Call(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(depth, byte(firehose.CallTypeCreate2), from, to, input, gas, value)
+func (s *TracerTester) StartCreate2Call(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(byte(firehose.CallTypeCreate2), from, to, input, gas, value)
 }
 
-func (s *TracerTester) StartDelegateCall(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(depth, byte(firehose.CallTypeDelegateCall), from, to, input, gas, value)
+func (s *TracerTester) StartDelegateCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(byte(firehose.CallTypeDelegateCall), from, to, input, gas, value)
 }
 
-func (s *TracerTester) StartCallCode(depth int, from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(depth, byte(firehose.CallTypeCallCode), from, to, input, gas, value)
+func (s *TracerTester) StartCallCode(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
+	return s.StartCallRaw(byte(firehose.CallTypeCallCode), from, to, input, gas, value)
 }
 
 // EndCall ends a call context successfully
-func (s *TracerTester) EndCall(output []byte, gasUsed uint64, err error) *TracerTester {
-	s.Tracer.OnCallExit(output, gasUsed, err)
+// Automatically manages depth: decrements depth and passes it to OnCallExit
+func (s *TracerTester) EndCall(output []byte, gasUsed uint64) *TracerTester {
+	s.depth--
+	s.Tracer.OnCallExit(s.depth, output, gasUsed, nil, false)
+	return s
+}
+
+// EndCallFailed ends a call context with an error
+// Automatically manages depth: decrements depth and passes it to OnCallExit
+func (s *TracerTester) EndCallFailed(output []byte, gasUsed uint64, err error, reverted bool) *TracerTester {
+	s.depth--
+	s.Tracer.OnCallExit(s.depth, output, gasUsed, err, reverted)
 	return s
 }
 
@@ -315,7 +316,7 @@ func (s *TracerTester) OpCode(pc uint64, op byte, gas, cost uint64) *TracerTeste
 	// Call shared tracer's OnOpcode with empty scope data
 	// This will call the native validator internally if present
 	emptyScope := firehose.OpcodeScopeData{}
-	s.Tracer.OnOpcode(pc, op, gas, cost, emptyScope, nil, 0, nil)
+	s.Tracer.OnOpcode(pc, op, gas, cost, emptyScope, nil, s.depth-1, nil)
 
 	return s
 }
@@ -327,38 +328,6 @@ func (s *TracerTester) Keccak(hash [32]byte, preimage []byte) *TracerTester {
 	// This will call the native validator internally if present
 	s.Tracer.OnKeccakPreimage(hash, preimage)
 
-	return s
-}
-
-// EndCallReverted ends a call context with a revert error
-// Wraps testErrExecutionReverted so tracer recognizes it as reverted
-func (s *TracerTester) EndCallReverted(output []byte, gasUsed uint64, reason string) *TracerTester {
-	err := &wrapError{
-		reason:  reason,
-		wrapped: testErrExecutionReverted,
-	}
-	s.Tracer.OnCallExit(output, gasUsed, err)
-	return s
-}
-
-// EndCallFailed ends a call context with a non-revert failure
-// Uses errors that are recognized as failures but not reverts
-func (s *TracerTester) EndCallFailed(output []byte, gasUsed uint64, reason string) *TracerTester {
-	// Map common failure reasons to their appropriate errors
-	var wrapped error
-	switch reason {
-	case "out of gas":
-		wrapped = testErrOutOfGas
-	default:
-		// Generic error - not recognized as revert
-		wrapped = errors.New(reason)
-	}
-
-	err := &wrapError{
-		reason:  reason,
-		wrapped: wrapped,
-	}
-	s.Tracer.OnCallExit(output, gasUsed, err)
 	return s
 }
 
@@ -414,7 +383,7 @@ func (s *TracerTester) Log(addr [20]byte, topics [][32]byte, data []byte, blockI
 func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractBalance *big.Int) *TracerTester {
 	// Step 1: Simulate OnOpcode(SELFDESTRUCT) - marks active call as suicided
 	// (matching native tracer firehose.go:1191-1193)
-	activeCallDepth := s.Tracer.GetTestingCallStackDepth() - 1 // Depth of the active call (0 for root call)
+	activeCallDepth := s.depth - 1 // Depth of the active call (depth-1 since we incremented after StartCall)
 
 	// Mark the shared tracer's active call as suicided and executed
 	// OnOpcode in the native tracer sets both Suicide and ExecutedCode
@@ -474,7 +443,7 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 	// - Call the native validator with the correct depth
 	// - Check latestCallEnterSuicided and skip processing
 	// - Clear the flag so subsequent OnCallExit (for the real call) works correctly
-	s.Tracer.OnCallExit([]byte{}, 0, nil)
+	s.Tracer.OnCallExit(selfDestructDepth, []byte{}, 0, nil, false)
 
 	return s
 }
@@ -510,7 +479,7 @@ func (s *TracerTester) EndSystemCall() *TracerTester {
 func (s *TracerTester) SystemCall(from, to [20]byte, input []byte, gas uint64, output []byte, gasUsed uint64) *TracerTester {
 	s.Tracer.OnSystemCallStart()
 	s.Tracer.OnCallEnter(0, byte(firehose.CallTypeCall), from, to, input, gas, big.NewInt(0))
-	s.Tracer.OnCallExit(output, gasUsed, nil)
+	s.Tracer.OnCallExit(0, output, gasUsed, nil, false) // System calls are at depth 0
 	s.Tracer.OnSystemCallEnd()
 	return s
 }

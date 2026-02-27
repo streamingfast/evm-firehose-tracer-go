@@ -27,9 +27,9 @@ const ProtocolVersion = "3.0"
 // These match the error strings from go-ethereum/core/vm/errors.go
 // We use string matching instead of errors.Is to avoid importing the vm package
 const (
-	errExecutionReverted           = "execution reverted"
-	errInsufficientBalanceTransfer = "insufficient balance for transfer"
-	errMaxCallDepth                = "max call depth exceeded"
+	TextExecutionRevertedErr           = "execution reverted"
+	TextInsufficientBalanceTransferErr = "insufficient balance for transfer"
+	TextMaxCallDepthErr                = "max call depth exceeded"
 )
 
 var (
@@ -243,12 +243,8 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 
 	// Create a synthetic transaction to hold all genesis changes
 	// This matches the native tracer behavior (creating a synthetic empty transaction)
-	zeroAddr := [20]byte{} // Zero address
-	t.OnTxStart(TxEvent{
-		Hash: [32]byte{}, // Empty hash for genesis
-		From: [20]byte{}, // Zero address
-		To:   &zeroAddr,  // Zero address (not nil - genesis is not a contract creation)
-	}, nil) // Genesis blocks don't need state reader
+	zeroAddr := [20]byte{}
+	t.OnTxStart(TxEvent{Hash: [32]byte{}, From: [20]byte{}, To: &zeroAddr}, nil)
 
 	// Create a synthetic call to hold the changes
 	// The CALL from zero address to zero address represents the genesis allocation
@@ -282,8 +278,8 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 		}
 	}
 
-	// End the synthetic call (output=nil, gasUsed=0, err=nil)
-	t.OnCallExit(nil, 0, nil)
+	// End the synthetic call (output=nil, gasUsed=0, err=nil, reverted=false)
+	t.OnCallExit(0, nil, 0, nil, false) // Genesis synthetic call is at depth 0
 
 	// End the synthetic transaction with a successful receipt
 	t.OnTxEnd(&ReceiptData{
@@ -449,7 +445,7 @@ func (t *Tracer) newBlockHeaderFromBlockData(block BlockData) *pbeth.BlockHeader
 		Number:           block.Number,
 		GasLimit:         block.GasLimit,
 		GasUsed:          block.GasUsed,
-		Timestamp:        timestamppb.New(toTime(block.Time)),
+		Timestamp:        timestamppb.New(time.Unix(int64(block.Time), 0)),
 		ExtraData:        block.Extra,
 		MixHash:          block.MixDigest[:],
 		Nonce:            block.Nonce,
@@ -482,7 +478,7 @@ func (t *Tracer) newBlockHeaderFromUncleData(uncle UncleData) *pbeth.BlockHeader
 		Number:           uncle.Number,
 		GasLimit:         uncle.GasLimit,
 		GasUsed:          uncle.GasUsed,
-		Timestamp:        timestamppb.New(toTime(uncle.Time)),
+		Timestamp:        timestamppb.New(time.Unix(int64(uncle.Time), 0)),
 		ExtraData:        uncle.Extra,
 		MixHash:          uncle.MixDigest[:],
 		Nonce:            uncle.Nonce,
@@ -499,23 +495,6 @@ func (t *Tracer) newBlockHeaderFromUncleData(uncle UncleData) *pbeth.BlockHeader
 	}
 
 	return header
-}
-
-// buildPrecompileChecker creates a checker function from a list of precompile addresses
-// This is used when the caller provides a list of active precompiles for the block
-func (t *Tracer) buildPrecompileChecker(activePrecompiles [][20]byte) func(addr [20]byte) bool {
-	activeMap := make(map[[20]byte]bool, len(activePrecompiles))
-	for _, addr := range activePrecompiles {
-		activeMap[addr] = true
-	}
-
-	return func(addr [20]byte) bool {
-		return activeMap[addr]
-	}
-}
-
-func toTime(timestamp uint64) time.Time {
-	return time.Unix(int64(timestamp), 0)
 }
 
 // reorderIsolatedTransactionsAndOrdinals reorders transactions and ordinals after parallel execution
@@ -1012,30 +991,20 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 }
 
 // OnCallExit is called when exiting a call
-func (t *Tracer) OnCallExit(output []byte, gasUsed uint64, err error) {
-	reverted := err != nil
+// depth is the call depth (0 = root call, 1 = first nested call, etc.)
+func (t *Tracer) OnCallExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	// Call native validator right at the start (standard hook pattern)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
+	}
 
 	// Handle SELFDESTRUCT exit (matching native tracer firehose.go:1420-1429)
 	// Geth native tracer calls OnEnter(SELFDESTRUCT)/OnExit(), but we don't create a call for it
 	// We must skip this OnExit call because we didn't push it on our CallStack
 	if t.latestCallEnterSuicided {
-		// For SELFDESTRUCT, we need to call the native validator with the depth
-		// that was passed to OnCallEnter, not the depth computed from the call stack
-		if t.nativeValidator != nil {
-			t.nativeValidator.OnCallExit(t.latestCallEnterSuicidedDepth, output, gasUsed, err, reverted)
-		}
-
-		firehoseTrace("skipping OnCallExit for SELFDESTRUCT opcode (latestCallEnterSuicided=true, depth=%d)", t.latestCallEnterSuicidedDepth)
+		firehoseTrace("skipping OnCallExit for SELFDESTRUCT opcode (latestCallEnterSuicided=true, depth=%d)", depth)
 		t.latestCallEnterSuicided = false
 		return
-	}
-
-	// Match native tracer: compute depth before any operations
-	depth := t.callStack.Depth() - 1 // -1 because we haven't popped yet
-
-	// Delegate to native validator before any processing
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
 	}
 
 	// Ensure we're in a valid state (matching native tracer line 1431)
@@ -1068,9 +1037,9 @@ func (t *Tracer) OnCallExit(output []byte, gasUsed uint64, err error) {
 		// Match native tracer logic from firehose.go line 1452:
 		// We also treat ErrInsufficientBalance and ErrDepth as reverted in Firehose model
 		// because they do not cost any gas.
-		call.StatusReverted = errorIsString(err, errExecutionReverted) ||
-			errorIsString(err, errInsufficientBalanceTransfer) ||
-			errorIsString(err, errMaxCallDepth)
+		call.StatusReverted = errorIsString(err, TextExecutionRevertedErr) ||
+			errorIsString(err, TextInsufficientBalanceTransferErr) ||
+			errorIsString(err, TextMaxCallDepthErr)
 	}
 
 	// Set EndOrdinal (matching native tracer line 1469)

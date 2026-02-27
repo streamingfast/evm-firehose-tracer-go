@@ -40,7 +40,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 
 		tester.
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -58,7 +58,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -77,7 +77,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(regularCode), []byte{}, regularCode).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -96,7 +96,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(invalidDelegation), []byte{}, invalidDelegation).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -119,7 +119,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(invalidDelegation), []byte{}, invalidDelegation).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -135,7 +135,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, [20]byte{}, bigInt(0), 21000, []byte{0x60, 0x80}).
-			EndCall([]byte{}, 21000, nil).
+			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
