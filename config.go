@@ -20,6 +20,27 @@ import (
 //   - error: Error if signature recovery fails
 type SetCodeAuthRecovery func(chainID [32]byte, address [20]byte, nonce uint64, v uint32, r, s [32]byte) ([20]byte, error)
 
+// StateReader provides read-only access to blockchain state during transaction execution
+// Blockchain implementations must provide this interface to enable state-dependent tracing:
+//   - EIP-7702 delegation detection (GetCode)
+//   - CREATE address calculation (GetNonce)
+//   - EIP-158 account existence checks (Exist)
+//
+// This is provided per-transaction via TxEvent.StateReader
+type StateReader interface {
+	// GetCode returns the code for the given address
+	// Returns nil/empty slice if the address has no code (EOA or non-existent account)
+	GetCode(addr [20]byte) []byte
+
+	// GetNonce returns the nonce for the given address
+	// Returns 0 if the address doesn't exist
+	GetNonce(addr [20]byte) uint64
+
+	// Exist returns true if the address exists in the state
+	// An address exists if it has non-zero nonce, non-zero balance, or code
+	Exist(addr [20]byte) bool
+}
+
 // ChainConfig defines the chain configuration for the tracer
 // Simplified version - assumes all historical forks are active
 // Only tracks future timestamp-based forks that may affect tracing behavior

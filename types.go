@@ -126,6 +126,11 @@ type TxEvent struct {
 
 	// EIP-7702 set code authorization list (type 4)
 	SetCodeAuthorizations []SetCodeAuthorization
+
+	// StateReader provides read-only access to blockchain state during transaction execution
+	// Required for EIP-7702 delegation detection, CREATE address calculation, etc.
+	// Blockchain implementations must provide this (e.g., from EVM StateDB)
+	StateReader StateReader
 }
 
 // AccessList represents EIP-2930 access list

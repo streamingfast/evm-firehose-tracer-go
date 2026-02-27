@@ -58,13 +58,16 @@ func convertToNativeChainConfig(cfg *ChainConfig) *params.ChainConfig {
 		return nil
 	}
 
+	// For merge blocks (PoS) to work properly, London and all prerequisite forks
+	// must be activated. We set them to block 0 (genesis activation) since our
+	// simplified ChainConfig doesn't track historical block-based forks.
 	return &params.ChainConfig{
 		ChainID:      cfg.ChainID,
+		LondonBlock:  big.NewInt(0), // Required for merge validation
 		ShanghaiTime: cfg.ShanghaiTime,
 		CancunTime:   cfg.CancunTime,
 		PragueTime:   cfg.PragueTime,
 		VerkleTime:   cfg.VerkleTime,
-		// Other fields left as nil since we don't track them
 	}
 }
 
@@ -312,6 +315,15 @@ func (v *nativeValidator) OnOpcode(pc uint64, op byte, gas, cost uint64, depth i
 	// The scope and rData parameters are only used for some opcodes (like KECCAK256),
 	// for SELFDESTRUCT we only need the opcode byte
 	v.tracer.OnOpcode(pc, op, gas, cost, nil, nil, depth, nil)
+}
+
+func (v *nativeValidator) OnKeccakPreimage(hash [32]byte, preimage []byte) {
+	if v == nil {
+		return
+	}
+
+	// Call native tracer's OnKeccakPreimage
+	v.tracer.OnKeccakPreimage(toCommonHash(hash), preimage)
 }
 
 func (v *nativeValidator) OnSystemCallStart() {
@@ -645,23 +657,79 @@ func convertToNativeLog(addr [20]byte, topics [][32]byte, data []byte, blockInde
 // It only implements the methods called by the native Firehose tracer (firehose.go)
 // The tracer primarily uses GetNonce, GetCode, and Exist for getExecutedCode checks
 // All other methods are no-op stubs since actual state is tracked via tracer hooks
-type mockStateDB struct{}
-
-func newMockStateDB() *mockStateDB {
-	return &mockStateDB{}
+type mockStateDB struct{
+	// Configurable state for testing
+	nonces map[common.Address]uint64
+	codes  map[common.Address][]byte
+	exists map[common.Address]bool
 }
 
-// Methods used by native firehose.go tracer
+func newMockStateDB() *mockStateDB {
+	return &mockStateDB{
+		nonces: make(map[common.Address]uint64),
+		codes:  make(map[common.Address][]byte),
+		exists: make(map[common.Address]bool),
+	}
+}
+
+// SetNonce sets the nonce for a specific address (for testing)
+func (s *mockStateDB) SetNonce(addr common.Address, nonce uint64) {
+	s.nonces[addr] = nonce
+}
+
+// SetCode sets the code for a specific address (for testing)
+func (s *mockStateDB) SetCode(addr common.Address, code []byte) {
+	s.codes[addr] = code
+	s.exists[addr] = true // Setting code implies account exists
+}
+
+// SetExist sets whether an address exists (for testing)
+func (s *mockStateDB) SetExist(addr common.Address, exists bool) {
+	s.exists[addr] = exists
+}
+
+// Methods used by native firehose.go tracer (takes common.Address)
 func (s *mockStateDB) GetNonce(addr common.Address) uint64 {
-	return 0 // Stub: actual nonces tracked via OnNonceChange hooks
+	if nonce, ok := s.nonces[addr]; ok {
+		return nonce
+	}
+	return 0 // Default: nonces start at 0
 }
 
 func (s *mockStateDB) GetCode(addr common.Address) []byte {
-	return nil // Stub: actual code tracked via OnCodeChange hooks
+	if code, ok := s.codes[addr]; ok {
+		return code
+	}
+	return nil // Default: no code (EOA or non-existent)
 }
 
 func (s *mockStateDB) Exist(addr common.Address) bool {
-	return true // Stub: assume all addresses exist for testing
+	if exists, ok := s.exists[addr]; ok {
+		return exists
+	}
+	return true // Default: assume addresses exist unless explicitly set to false
+}
+
+// mockStateReader wraps mockStateDB to implement StateReader interface
+// This allows the same mock state to be used by both the native validator (via StateDB)
+// and the shared tracer (via StateReader)
+type mockStateReader struct {
+	*mockStateDB
+}
+
+// GetCode implements StateReader interface (takes [20]byte instead of common.Address)
+func (m *mockStateReader) GetCode(addr [20]byte) []byte {
+	return m.mockStateDB.GetCode(common.Address(addr))
+}
+
+// GetNonce implements StateReader interface (takes [20]byte instead of common.Address)
+func (m *mockStateReader) GetNonce(addr [20]byte) uint64 {
+	return m.mockStateDB.GetNonce(common.Address(addr))
+}
+
+// Exist implements StateReader interface (takes [20]byte instead of common.Address)
+func (m *mockStateReader) Exist(addr [20]byte) bool {
+	return m.mockStateDB.Exist(common.Address(addr))
 }
 
 // No-op stub implementations for StateDB interface methods

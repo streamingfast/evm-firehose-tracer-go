@@ -3,19 +3,10 @@ package firehose
 import (
 	"testing"
 
-	eth "github.com/streamingfast/eth-go"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// hashBytes computes keccak256 hash of bytes for code hashes
-func hashBytes(data []byte) [32]byte {
-	hash := eth.Keccak256(data)
-	var result [32]byte
-	copy(result[:], hash)
-	return result
-}
 
 // TestTracer_DeferredCallState tests comprehensive deferred call state scenarios
 // covering changes before root call, after root call, and mixed patterns
@@ -68,7 +59,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	// deferred state works correctly in both scenarios.
 
 	t.Run("balance_changes_mixed_before_during_after", func(t *testing.T) {
-		t.Skip("Complex ordering test - before/after tests demonstrate deferred state works")
 		// Balance changes: before call, during call, after call
 		NewTracerTester(t).
 			StartBlockTrxNoHooks().
@@ -151,7 +141,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	})
 
 	t.Run("nonce_changes_mixed_before_during_after", func(t *testing.T) {
-		t.Skip("Complex ordering test - before/after tests demonstrate deferred state works")
 		// Nonce changes: before, during, after call
 		NewTracerTester(t).
 			StartBlockTrxNoHooks().
@@ -232,7 +221,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	})
 
 	t.Run("code_changes_mixed_before_during_after", func(t *testing.T) {
-		t.Skip("Complex ordering test - before/after tests demonstrate deferred state works")
 		// Code changes: before, during, after call
 		code1Old := []byte{0x60, 0x00}
 		code1New := []byte{0x60, 0x01}
@@ -314,15 +302,14 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	})
 
 	t.Run("gas_changes_mixed_before_during_after", func(t *testing.T) {
-		t.Skip("Complex ordering test - before/after tests demonstrate deferred state works")
 		// Gas changes: before, during, after call
 		NewTracerTester(t).
 			StartBlockTrxNoHooks().
 			// BEFORE: Intrinsic gas
 			GasChange(50000, 29000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 50000, []byte{}).
-			// DURING: Call execution
-			GasChange(29000, 8000, pbeth.GasChange_REASON_CALL).
+			// DURING: Call execution (using STATE_COLD_ACCESS as example of gas consumed during call)
+			GasChange(29000, 8000, pbeth.GasChange_REASON_STATE_COLD_ACCESS).
 			EndCall([]byte{}, 8000, nil).
 			// AFTER: Gas refund
 			GasChange(8000, 13000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
@@ -337,7 +324,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 				assert.Equal(t, pbeth.GasChange_REASON_INTRINSIC_GAS, call.GasChanges[0].Reason)
 
 				// During
-				assert.Equal(t, pbeth.GasChange_REASON_CALL, call.GasChanges[1].Reason)
+				assert.Equal(t, pbeth.GasChange_REASON_STATE_COLD_ACCESS, call.GasChanges[1].Reason)
 
 				// After (deferred)
 				assert.Equal(t, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION, call.GasChanges[2].Reason)
@@ -401,7 +388,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	})
 
 	t.Run("all_state_types_mixed_before_during_after", func(t *testing.T) {
-		t.Skip("Complex ordering test - before/after tests demonstrate deferred state works")
 		// Complex scenario: all state types before, during, and after root call
 		code1Old := []byte{}
 		code1New := []byte{0x60, 0x00}
@@ -423,7 +409,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			BalanceChange(BobAddr, bigInt(500), bigInt(600), pbeth.BalanceChange_REASON_TRANSFER).
 			NonceChange(BobAddr, 0, 1).
 			CodeChange(BobAddr, hashBytes(code2Old), hashBytes(code2New), code2Old, code2New).
-			GasChange(29000, 8000, pbeth.GasChange_REASON_CALL).
+			GasChange(29000, 8000, pbeth.GasChange_REASON_STATE_COLD_ACCESS).
 			EndCall([]byte{}, 8000, nil).
 			// === AFTER ROOT CALL ===
 			BalanceChange(AliceAddr, bigInt(690), bigInt(700), pbeth.BalanceChange_REASON_GAS_REFUND).
@@ -460,7 +446,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 
 				// Gas changes
 				assert.Equal(t, pbeth.GasChange_REASON_INTRINSIC_GAS, call.GasChanges[0].Reason, "First gas change should be intrinsic (before)")
-				assert.Equal(t, pbeth.GasChange_REASON_CALL, call.GasChanges[1].Reason, "Second gas change should be call (during)")
+				assert.Equal(t, pbeth.GasChange_REASON_STATE_COLD_ACCESS, call.GasChanges[1].Reason, "Second gas change should be call (during)")
 				assert.Equal(t, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION, call.GasChanges[2].Reason, "Third gas change should be refund (after)")
 			})
 	})

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/vm"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/require"
@@ -161,16 +162,33 @@ type TracerTester struct {
 
 	Block  *BlockEventBuilder
 	Tracer *Tracer
+
+	// Mock state reader for providing blockchain state to the tracer
+	// Wraps the native validator's mockStateDB
+	stateReader *mockStateReader
 }
 
 // NewTracerTester creates a new tester builder with native validator
 func NewTracerTester(t *testing.T) *TracerTester {
-	chainConfig := &ChainConfig{
+	return newTracerTesterWithConfig(t, &ChainConfig{
 		ChainID: big.NewInt(1),
 		// Use Ethereum-style signature recovery for SetCode authorizations
 		SetCodeAuthRecovery: EthereumSetCodeAuthRecovery,
-	}
+	})
+}
 
+// NewTracerTesterPrague creates a tracer tester with Prague fork enabled (for EIP-7702 testing)
+func NewTracerTesterPrague(t *testing.T) *TracerTester {
+	pragueTime := uint64(0) // Prague activated at genesis
+	return newTracerTesterWithConfig(t, &ChainConfig{
+		ChainID:             big.NewInt(1),
+		PragueTime:          &pragueTime,
+		SetCodeAuthRecovery: EthereumSetCodeAuthRecovery,
+	})
+}
+
+// newTracerTesterWithConfig creates a tester with a specific chain config
+func newTracerTesterWithConfig(t *testing.T, chainConfig *ChainConfig) *TracerTester {
 	tester := &TracerTester{
 		t: t,
 		Tracer: NewTracer(&Config{
@@ -183,9 +201,49 @@ func NewTracerTester(t *testing.T) *TracerTester {
 	tester.Tracer.nativeValidator, err = newNativeValidator("")
 	require.NoError(t, err, "creating native validator")
 
+	// Create state reader wrapper around the native validator's mockStateDB
+	tester.stateReader = &mockStateReader{mockStateDB: tester.Tracer.nativeValidator.stateDB}
+
 	tester.Tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
 
 	return tester
+}
+
+// toCommonAddress converts a [20]byte address to common.Address
+func toCommonAddress(addr [20]byte) common.Address {
+	return common.Address(addr)
+}
+
+// toCommonHash converts a [32]byte hash to common.Hash
+func toCommonHash(hash [32]byte) common.Hash {
+	return common.Hash(hash)
+}
+
+// SetMockStateCode sets the code for an address in the mock StateDB
+// This allows testing code paths that depend on StateDB.GetCode()
+func (s *TracerTester) SetMockStateCode(addr [20]byte, code []byte) *TracerTester {
+	if s.Tracer.nativeValidator != nil {
+		s.Tracer.nativeValidator.stateDB.SetCode(toCommonAddress(addr), code)
+	}
+	return s
+}
+
+// SetMockStateNonce sets the nonce for an address in the mock StateDB
+// This allows testing code paths that depend on StateDB.GetNonce()
+func (s *TracerTester) SetMockStateNonce(addr [20]byte, nonce uint64) *TracerTester {
+	if s.Tracer.nativeValidator != nil {
+		s.Tracer.nativeValidator.stateDB.SetNonce(toCommonAddress(addr), nonce)
+	}
+	return s
+}
+
+// SetMockStateExist sets whether an address exists in the mock StateDB
+// This allows testing code paths that depend on StateDB.Exist()
+func (s *TracerTester) SetMockStateExist(addr [20]byte, exists bool) *TracerTester {
+	if s.Tracer.nativeValidator != nil {
+		s.Tracer.nativeValidator.stateDB.SetExist(toCommonAddress(addr), exists)
+	}
+	return s
 }
 
 func (s *TracerTester) StartBlock() *TracerTester {
@@ -234,20 +292,25 @@ func (s *TracerTester) StartBlockSetCodeTrx() *TracerTester {
 // Uses TestTrx (legacy transaction) by default.
 func (s *TracerTester) StartBlockTrxNoHooks() *TracerTester {
 	s.Tracer.OnBlockStart(TestBlock)
-	s.Tracer.OnTxStart(TestTrx)
+	tx := TestTrx
+	tx.StateReader = s.stateReader
+	s.Tracer.OnTxStart(tx)
 	return s
 }
 
 // StartTrxNoHooks starts a transaction WITHOUT starting a block or automatic hooks
 // Use this when you've already started a block (e.g., after system calls)
 func (s *TracerTester) StartTrxNoHooks() *TracerTester {
-	s.Tracer.OnTxStart(TestTrx)
+	tx := TestTrx
+	tx.StateReader = s.stateReader
+	s.Tracer.OnTxStart(tx)
 	return s
 }
 
 // startBlockTrxWithEvent is the internal implementation for starting a block with a specific transaction
 func (s *TracerTester) startBlockTrxWithEvent(tx TxEvent) *TracerTester {
 	s.Tracer.OnBlockStart(TestBlock)
+	tx.StateReader = s.stateReader
 	s.Tracer.OnTxStart(tx)
 
 	// Standard Ethereum transaction initialization hooks
@@ -310,6 +373,35 @@ func (s *TracerTester) StartCallCode(depth int, from, to [20]byte, value *big.In
 // EndCall ends a call context successfully
 func (s *TracerTester) EndCall(output []byte, gasUsed uint64, err error) *TracerTester {
 	s.Tracer.OnCallExit(output, gasUsed, err)
+	return s
+}
+
+// OpCode simulates an opcode execution to trigger ExecutedCode setting
+// This ensures both shared and native tracers set ExecutedCode correctly
+func (s *TracerTester) OpCode(pc uint64, op byte, gas, cost uint64) *TracerTester {
+	// Call shared tracer's OnOpcode with empty scope data
+	emptyScope := OpcodeScopeData{}
+	s.Tracer.OnOpcode(pc, op, gas, cost, emptyScope, nil, 0, nil)
+
+	// Also call native validator's OnOpcode if present (different signature)
+	if s.Tracer.nativeValidator != nil {
+		s.Tracer.nativeValidator.OnOpcode(pc, op, gas, cost, 0)
+	}
+
+	return s
+}
+
+// Keccak simulates a KECCAK256 opcode execution with preimage capture
+// This ensures both shared and native tracers store keccak preimages correctly
+func (s *TracerTester) Keccak(hash [32]byte, preimage []byte) *TracerTester {
+	// Call shared tracer's OnKeccakPreimage
+	s.Tracer.OnKeccakPreimage(hash, preimage)
+
+	// Also call native validator's OnKeccakPreimage if present
+	if s.Tracer.nativeValidator != nil {
+		s.Tracer.nativeValidator.OnKeccakPreimage(hash, preimage)
+	}
+
 	return s
 }
 

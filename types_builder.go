@@ -90,6 +90,10 @@ func (b *BlockEventBuilder) Bloom(bloom []byte) *BlockEventBuilder {
 
 // Build creates a BlockEvent
 func (b *BlockEventBuilder) Build() BlockEvent {
+	// IsMerge is true when difficulty is 0 (PoS blocks)
+	// This matches go-ethereum's blockIsMerge() logic
+	isMerge := b.difficulty != nil && b.difficulty.Sign() == 0
+
 	return BlockEvent{
 		Block: BlockData{
 			Number:     b.number,
@@ -99,6 +103,7 @@ func (b *BlockEventBuilder) Build() BlockEvent {
 			Coinbase:   b.coinbase,
 			GasLimit:   b.gasLimit,
 			Difficulty: b.difficulty,
+			IsMerge:    isMerge,
 			Size:       b.size,
 			Bloom:      b.bloom,
 		},
@@ -123,6 +128,7 @@ type TxEventBuilder struct {
 	blobGasFeeCap         *big.Int
 	blobHashes            [][32]byte
 	setCodeAuthorizations []SetCodeAuthorization
+	stateReader           StateReader
 }
 
 // Type sets the transaction type
@@ -221,6 +227,12 @@ func (t *TxEventBuilder) SetCodeAuthorizations(authList []SetCodeAuthorization) 
 	return t
 }
 
+// StateReader sets the state reader for blockchain state access
+func (t *TxEventBuilder) StateReader(stateReader StateReader) *TxEventBuilder {
+	t.stateReader = stateReader
+	return t
+}
+
 // Defaults sets common default values for testing:
 // - Type: Legacy (0)
 // - Hash: Zero hash (usually computed by native validator)
@@ -266,6 +278,7 @@ func (t *TxEventBuilder) Build() TxEvent {
 		BlobGasFeeCap:         t.blobGasFeeCap,
 		BlobHashes:            t.blobHashes,
 		SetCodeAuthorizations: t.setCodeAuthorizations,
+		StateReader:           t.stateReader,
 	}
 }
 

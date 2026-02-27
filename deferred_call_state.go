@@ -67,21 +67,38 @@ func (d *DeferredCallState) AddCodeChange(change *pbeth.CodeChange) {
 
 // MaybePopulateCallAndReset populates the call with deferred state if any exists
 // and then resets the deferred state. This should only be called for root calls.
+//
+// source can be:
+// - "enter": Deferred state from BEFORE the root call starts (e.g., EIP-7702 nonce changes)
+//            These are PREPENDED to maintain chronological order
+// - "root": Deferred state from AFTER the root call ends (e.g., gas refunds)
+//           These are APPENDED to maintain chronological order
 func (d *DeferredCallState) MaybePopulateCallAndReset(source string, call *pbeth.Call) error {
 	if d.IsEmpty() {
 		return nil
 	}
 
-	if source != "root" {
-		return fmt.Errorf("unexpected source for deferred call state, expected root but got %s, deferred call's state are always produced on the 'root' call", source)
+	if source != "root" && source != "enter" {
+		return fmt.Errorf("unexpected source for deferred call state, expected 'root' or 'enter' but got %s", source)
 	}
 
-	// Append all deferred state to the call
-	call.AccountCreations = append(call.AccountCreations, d.accountCreations...)
-	call.BalanceChanges = append(call.BalanceChanges, d.balanceChanges...)
-	call.GasChanges = append(call.GasChanges, d.gasChanges...)
-	call.NonceChanges = append(call.NonceChanges, d.nonceChanges...)
-	call.CodeChanges = append(call.CodeChanges, d.codeChanges...)
+	if source == "enter" {
+		// PREPEND deferred state (changes that happened BEFORE the call)
+		// This maintains chronological order: before -> during -> after
+		call.AccountCreations = append(d.accountCreations, call.AccountCreations...)
+		call.BalanceChanges = append(d.balanceChanges, call.BalanceChanges...)
+		call.GasChanges = append(d.gasChanges, call.GasChanges...)
+		call.NonceChanges = append(d.nonceChanges, call.NonceChanges...)
+		call.CodeChanges = append(d.codeChanges, call.CodeChanges...)
+	} else {
+		// APPEND deferred state (changes that happened AFTER the call)
+		// This maintains chronological order: before -> during -> after
+		call.AccountCreations = append(call.AccountCreations, d.accountCreations...)
+		call.BalanceChanges = append(call.BalanceChanges, d.balanceChanges...)
+		call.GasChanges = append(call.GasChanges, d.gasChanges...)
+		call.NonceChanges = append(call.NonceChanges, d.nonceChanges...)
+		call.CodeChanges = append(call.CodeChanges, d.codeChanges...)
+	}
 
 	d.Reset()
 

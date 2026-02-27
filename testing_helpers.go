@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/crypto"
+	eth "github.com/streamingfast/eth-go"
 )
 
 // Common test private keys and derived addresses
@@ -81,16 +82,20 @@ func mustBigInt(s string) *big.Int {
 // successReceipt creates a successful receipt (status 1) with the given gas used
 func successReceipt(gasUsed uint64) *ReceiptData {
 	return &ReceiptData{
-		Status:  1,
-		GasUsed: gasUsed,
+		TransactionIndex:  0,
+		Status:            1,
+		GasUsed:           gasUsed,
+		CumulativeGasUsed: gasUsed,
 	}
 }
 
 // failedReceipt creates a failed receipt (status 0) with the given gas used
 func failedReceipt(gasUsed uint64) *ReceiptData {
 	return &ReceiptData{
-		Status:  0,
-		GasUsed: gasUsed,
+		TransactionIndex:  0,
+		Status:            0,
+		GasUsed:           gasUsed,
+		CumulativeGasUsed: gasUsed,
 	}
 }
 
@@ -106,10 +111,84 @@ func hash32(n uint64) [32]byte {
 }
 
 // receiptWithLogs creates a successful receipt with logs
+// receiptWithLogs creates a successful receipt (status 1) with logs
 func receiptWithLogs(gasUsed uint64, logs []LogData) *ReceiptData {
 	return &ReceiptData{
-		Status:  1,
-		GasUsed: gasUsed,
-		Logs:    logs,
+		TransactionIndex:  0,
+		Status:            1,
+		GasUsed:           gasUsed,
+		CumulativeGasUsed: gasUsed,
+		Logs:              logs,
 	}
+}
+
+// failedReceiptWithLogs creates a failed receipt (status 0) with logs
+func failedReceiptWithLogs(gasUsed uint64, logs []LogData) *ReceiptData {
+	return &ReceiptData{
+		TransactionIndex:  0,
+		Status:            0,
+		GasUsed:           gasUsed,
+		CumulativeGasUsed: gasUsed,
+		Logs:              logs,
+	}
+}
+
+// receiptAt creates a receipt at a specific transaction index
+func receiptAt(index uint32, status uint64, gasUsed uint64, cumulativeGas uint64, logs []LogData) *ReceiptData {
+	return &ReceiptData{
+		TransactionIndex:  index,
+		Status:            status,
+		GasUsed:           gasUsed,
+		CumulativeGasUsed: cumulativeGas,
+		Logs:              logs,
+	}
+}
+
+// hashBytes computes keccak256 hash of bytes for code hashes
+func hashBytes(data []byte) [32]byte {
+	hash := eth.Keccak256(data)
+	var result [32]byte
+	copy(result[:], hash)
+	return result
+}
+
+// Log helpers for creating test logs
+
+// logData creates a LogData with the given address, topics, and data
+func logData(addr [20]byte, topics [][32]byte, data []byte) LogData {
+	return LogData{
+		Address: addr,
+		Topics:  topics,
+		Data:    data,
+	}
+}
+
+// log0 creates a log with 0 topics
+func log0(addr [20]byte, data []byte) LogData {
+	return logData(addr, nil, data)
+}
+
+// log1 creates a log with 1 topic
+func log1(addr [20]byte, topic0 [32]byte, data []byte) LogData {
+	return logData(addr, [][32]byte{topic0}, data)
+}
+
+// log2 creates a log with 2 topics
+func log2(addr [20]byte, topic0, topic1 [32]byte, data []byte) LogData {
+	return logData(addr, [][32]byte{topic0, topic1}, data)
+}
+
+// log3 creates a log with 3 topics
+func log3(addr [20]byte, topic0, topic1, topic2 [32]byte, data []byte) LogData {
+	return logData(addr, [][32]byte{topic0, topic1, topic2}, data)
+}
+
+// log4 creates a log with 4 topics
+func log4(addr [20]byte, topic0, topic1, topic2, topic3 [32]byte, data []byte) LogData {
+	return logData(addr, [][32]byte{topic0, topic1, topic2, topic3}, data)
+}
+
+// topic creates a [32]byte topic from a string for testing
+func topic(s string) [32]byte {
+	return hashBytes([]byte(s))
 }

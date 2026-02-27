@@ -62,6 +62,7 @@ type Tracer struct {
 	// Transaction state
 	transaction          *pbeth.TransactionTrace
 	transactionLogIndex  uint32
+	transactionStateReader StateReader           // State reader for current transaction (from TxEvent)
 	inSystemCall         bool
 	transactionIsolated  bool                    // true = isolated mode, false = coordinator mode
 	transactionTransient *pbeth.TransactionTrace // Only used in isolated mode
@@ -196,6 +197,7 @@ func (t *Tracer) resetBlock() {
 func (t *Tracer) resetTransaction() {
 	t.transaction = nil
 	t.transactionLogIndex = 0
+	t.transactionStateReader = nil
 	t.inSystemCall = false
 	t.transactionTransient = nil
 
@@ -450,6 +452,9 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 
 	firehoseInfo("trx start (hash=%x type=%d gas=%d isolated=%t)", event.Hash, event.Type, event.Gas, t.transactionIsolated)
 
+	// Store state reader for this transaction
+	t.transactionStateReader = event.StateReader
+
 	// Compute effective gas price based on transaction type
 	effectiveGasPrice := computeEffectiveGasPrice(event, t.blockBaseFee)
 
@@ -643,9 +648,11 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	rootCall := t.transaction.Calls[0]
 
 	// Move any remaining deferred state to root call FIRST
-	// (this includes nonce changes that occur before the root call starts)
+	// (this includes state changes that occur after the root call ends)
 	if !t.deferredCallState.IsEmpty() {
-		t.deferredCallState.MaybePopulateCallAndReset("root", rootCall)
+		if err := t.deferredCallState.MaybePopulateCallAndReset("root", rootCall); err != nil {
+			panic(fmt.Sprintf("failed to populate deferred state on tx end: %v", err))
+		}
 	}
 
 	// Discard SetCode authorizations that don't have corresponding nonce changes
@@ -654,15 +661,18 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	// occur before the root call starts
 	t.discardUncommittedSetCodeAuthorizations(rootCall)
 
+	// Copy root call's return data to transaction (matching native tracer line 852)
+	// This is the return value from the top-level contract call
+	t.transaction.ReturnData = rootCall.ReturnData
+
+	// Populate state reverted flags (MUST happen before log processing)
+	t.populateStateReverted()
+
 	// Populate receipt data
 	if receipt != nil {
 		t.transaction.Index = receipt.TransactionIndex
 		t.transaction.GasUsed = receipt.GasUsed
 		t.transaction.Receipt = t.newReceiptFromData(receipt)
-
-		// Assign ordinals and indexes to receipt logs from call logs
-		// (matching native tracer's assignOrdinalAndIndexToReceiptLogs)
-		t.assignOrdinalAndIndexToReceiptLogs()
 
 		if receipt.Status == 1 {
 			t.transaction.Status = pbeth.TransactionTraceStatus_SUCCEEDED
@@ -671,17 +681,18 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 		}
 	}
 
-	// Check if root call reverted
+	// Check if root call reverted (overrides receipt status)
 	if rootCall.StatusReverted {
 		t.transaction.Status = pbeth.TransactionTraceStatus_REVERTED
 	}
 
-	// Copy root call's return data to transaction (matching native tracer line 852)
-	// This is the return value from the top-level contract call
-	t.transaction.ReturnData = rootCall.ReturnData
+	// Remove BlockIndex from logs in reverted calls
+	// (matching native tracer's removeLogBlockIndexOnStateRevertedCalls)
+	t.removeLogBlockIndexOnStateRevertedCalls()
 
-	// Populate state reverted flags
-	t.populateStateReverted()
+	// Assign ordinals and indexes to receipt logs from call logs
+	// (matching native tracer's assignOrdinalAndIndexToReceiptLogs)
+	t.assignOrdinalAndIndexToReceiptLogs()
 
 	// Set end ordinal
 	t.transaction.EndOrdinal = t.blockOrdinal.Next()
@@ -716,6 +727,19 @@ func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionRece
 	}
 
 	return r
+}
+
+// removeLogBlockIndexOnStateRevertedCalls removes BlockIndex from logs in reverted calls
+// This matches the native tracer's removeLogBlockIndexOnStateRevertedCalls function
+// Logs in reverted calls should have BlockIndex set to 0 since they don't make it into the final state
+func (t *Tracer) removeLogBlockIndexOnStateRevertedCalls() {
+	for _, call := range t.transaction.Calls {
+		if call.StateReverted {
+			for _, log := range call.Logs {
+				log.BlockIndex = 0
+			}
+		}
+	}
 }
 
 // assignOrdinalAndIndexToReceiptLogs copies ordinals and indexes from call logs to receipt logs
@@ -860,6 +884,7 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 		GasConsumed:  0,
 		Input:        input,
 		BeginOrdinal: t.blockOrdinal.Next(),
+		// ExecutedCode is set in OnOpcode (matches native tracer behavior)
 	}
 
 	// Handle DELEGATECALL code address
@@ -868,9 +893,27 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 	// 	call.CodeAddress = codeAddress[:]
 	// }
 
+	// EIP-7702: Detect delegation designators in account code (Prague fork)
+	// Check if account code contains delegation bytecode (0xef0100 + address)
+	if t.blockRules.IsPrague && !t.inSystemCall && !t.blockIsGenesis && call.CallType != pbeth.CallType_CREATE {
+		// Get code from state reader if available
+		if t.transactionStateReader != nil {
+			code := t.transactionStateReader.GetCode(to)
+			if len(code) != 0 {
+				// ParseDelegation returns (address, true) if valid delegation
+				if target, ok := parseDelegation(code); ok {
+					firehoseDebug("call resolved delegation (from=%s, delegates_to=%s)", from, target)
+					call.AddressDelegatesTo = target[:]
+				}
+			}
+		}
+	}
+
 	// Move deferred state to this call if it's the first call
 	if depth == 0 {
-		t.deferredCallState.MaybePopulateCallAndReset("enter", call)
+		if err := t.deferredCallState.MaybePopulateCallAndReset("enter", call); err != nil {
+			panic(fmt.Sprintf("failed to populate deferred state on call enter: %v", err))
+		}
 	}
 
 	// Don't append to transaction here - will be appended in OnCallExit
@@ -1227,24 +1270,41 @@ func (t *Tracer) OnSystemCallEnd() {
 
 // OnOpcode is called for each opcode (optional, for detailed tracing)
 func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScopeData, rData []byte, depth int, err error) {
-	// Only trace opcodes if enabled
-	if !isTraceFullEnabled {
+	call := t.callStack.Peek()
+	if call == nil {
 		return
 	}
+
+	// Set ExecutedCode to true (non-backward-compatible mode)
+	// This matches native tracer behavior in captureInterpreterStep (firehose.go:1296)
+	// Note: Native tracer ALWAYS sets this, no trace level check
+	call.ExecutedCode = true
+
+	// Detailed opcode-level tracing could be added here
+	// For now, we skip it as it's very verbose
+	// (would add gas changes, keccak preimages, etc.)
+}
+
+// OnKeccakPreimage is called when a keccak256 preimage is available
+// This is typically called during KECCAK256 opcode execution
+// The preimage is the input data that was used to produce the given keccak hash
+func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
+	t.ensureInBlockAndInTrxAndInCall()
 
 	call := t.callStack.Peek()
 	if call == nil {
 		return
 	}
 
-	// This would add detailed opcode-level tracing
-	// For now, we skip it as it's very verbose
-}
+	if call.KeccakPreimages == nil {
+		call.KeccakPreimages = make(map[string]string)
+	}
 
-// OnKeccakPreimage is called when a keccak256 preimage is available
-func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
-	// Store keccak preimages for later lookup
-	// This is used to map storage slot hashes back to their keys
+	// Store the preimage as hex-encoded string
+	// Note: In non-backward-compatible mode (Ver 4), we store empty preimages as empty strings
+	// (not as "." like the old tracer did)
+	call.KeccakPreimages[hex.EncodeToString(hash[:])] = hex.EncodeToString(preimage)
+
 	firehoseTrace("keccak preimage (hash=%x preimage_len=%d)", hash, len(preimage))
 }
 
@@ -1493,3 +1553,19 @@ func (t *Tracer) panicInvalidState(msg string, callerSkip int) {
 		t.transactionIsolated,
 	))
 }
+
+// parseDelegation tries to parse a delegation designator from bytecode
+// EIP-7702: Delegation format is 0xef0100 + 20-byte address (23 bytes total)
+func parseDelegation(code []byte) ([20]byte, bool) {
+	var delegationPrefix = []byte{0xef, 0x01, 0x00}
+	
+	if len(code) != 23 || !bytes.HasPrefix(code, delegationPrefix) {
+		return [20]byte{}, false
+	}
+	
+	var addr [20]byte
+	copy(addr[:], code[len(delegationPrefix):])
+	return addr, true
+}
+
+// toCommonAddress converts [20]byte to common.Address
