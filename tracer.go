@@ -59,7 +59,6 @@ type Tracer struct {
 	blockOrdinal                *Ordinal
 	blockFinality               *FinalityStatus
 	blockRules                  Rules // Fork rules for current block (computed once per block)
-	blockIsPrecompiledAddr      func(addr [20]byte) bool
 	blockReorderOrdinal         bool
 	blockReorderOrdinalSnapshot uint64
 	blockReorderOrdinalOnce     sync.Once
@@ -74,9 +73,10 @@ type Tracer struct {
 	transactionTransient   *pbeth.TransactionTrace // Only used in isolated mode
 
 	// Call state
-	callStack               *CallStack
-	deferredCallState       *DeferredCallState
-	latestCallEnterSuicided bool
+	callStack                    *CallStack
+	deferredCallState            *DeferredCallState
+	latestCallEnterSuicided      bool
+	latestCallEnterSuicidedDepth int // Depth of the SELFDESTRUCT OnCallEnter (for native validator)
 
 	// Chain-specific state (used via optional hooks)
 	// These fields are included in the shared Tracer to support chains that need them:
@@ -167,12 +167,11 @@ func (t *Tracer) newIsolatedTransactionTracer(tracerID string) *Tracer {
 		tracerID:    tracerID,
 
 		// Block state (shared from coordinator)
-		block:                  t.block,
-		blockBaseFee:           t.blockBaseFee,
-		blockOrdinal:           &Ordinal{},
-		blockFinality:          t.blockFinality,
-		blockIsPrecompiledAddr: t.blockIsPrecompiledAddr,
-		blockRules:             t.blockRules,
+		block:         t.block,
+		blockBaseFee:  t.blockBaseFee,
+		blockOrdinal:  &Ordinal{},
+		blockFinality: t.blockFinality,
+		blockRules:    t.blockRules,
 
 		// Transaction state (fresh for this isolated tracer)
 		transactionLogIndex: 0,
@@ -191,7 +190,6 @@ func (t *Tracer) resetBlock() {
 	t.blockBaseFee = nil
 	t.blockOrdinal.Reset()
 	t.blockFinality.Reset()
-	t.blockIsPrecompiledAddr = nil
 	t.blockRules = Rules{}
 	t.blockReorderOrdinal = false
 	t.blockReorderOrdinalSnapshot = 0
@@ -250,7 +248,7 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 		Hash: [32]byte{}, // Empty hash for genesis
 		From: [20]byte{}, // Zero address
 		To:   &zeroAddr,  // Zero address (not nil - genesis is not a contract creation)
-	})
+	}, nil) // Genesis blocks don't need state reader
 
 	// Create a synthetic call to hold the changes
 	// The CALL from zero address to zero address represents the genesis allocation
@@ -348,17 +346,6 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 
 	// Compute block rules for this block (block-scoped fork flags)
 	t.blockRules = t.chainConfig.Rules(new(big.Int).SetUint64(block.Number), block.IsMerge, block.Time)
-
-	// Use provided precompile checker, or build one from the list, or use a no-op
-	if event.IsPrecompiledAddr != nil {
-		t.blockIsPrecompiledAddr = event.IsPrecompiledAddr
-	} else if len(event.ActivePrecompiles) > 0 {
-		t.blockIsPrecompiledAddr = t.buildPrecompileChecker(event.ActivePrecompiles)
-	} else {
-		// No precompiles provided - use a no-op checker (always returns false)
-		t.blockIsPrecompiledAddr = func(addr [20]byte) bool { return false }
-	}
-
 	firehoseInfo("block start (number=%d hash=%x)", block.Number, block.Hash)
 
 	// Create protobuf block
@@ -542,7 +529,10 @@ func (t *Tracer) reorderIsolatedTransactionsAndOrdinals() {
 // ============================================================================
 
 // OnTxStart is called at the beginning of transaction execution
-func (t *Tracer) OnTxStart(event TxEvent) {
+// stateReader provides read-only access to blockchain state during transaction execution.
+// Required for EIP-7702 delegation detection, CREATE address calculation, etc.
+// Blockchain implementations must provide this (e.g., from EVM StateDB)
+func (t *Tracer) OnTxStart(event TxEvent, stateReader StateReader) {
 	if t.nativeValidator != nil {
 		// Get the transaction hash computed by the native go-ethereum tracer
 		// This ensures we use the correct hash for all transaction types
@@ -553,7 +543,7 @@ func (t *Tracer) OnTxStart(event TxEvent) {
 	firehoseInfo("trx start (hash=%x type=%d gas=%d isolated=%t)", event.Hash, event.Type, event.Gas, t.transactionIsolated)
 
 	// Store state reader for this transaction
-	t.transactionStateReader = event.StateReader
+	t.transactionStateReader = stateReader
 
 	// Compute effective gas price based on transaction type
 	effectiveGasPrice := computeEffectiveGasPrice(event, t.blockBaseFee)
@@ -966,11 +956,12 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 		// Set flag to indicate suicide happened (matching firehose.go:1040-1041)
 		// The next OnCallExit must be ignored, this variable will make it skip processing
 		t.latestCallEnterSuicided = true
+		t.latestCallEnterSuicidedDepth = depth // Store depth for native validator
 
 		// Don't create a new call for SELFDESTRUCT (matching firehose.go:1038)
 		// Note: The actual call.Suicide marking happens in OnOpcode (firehose.go:1193)
 		// but since we don't have OnOpcode in tests, we'll handle it in the test helper
-		firehoseTrace("SELFDESTRUCT opcode: set latestCallEnterSuicided flag, not creating new call")
+		firehoseTrace("SELFDESTRUCT opcode: set latestCallEnterSuicided flag (depth=%d), not creating new call", depth)
 		return
 	}
 
@@ -1022,22 +1013,29 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 
 // OnCallExit is called when exiting a call
 func (t *Tracer) OnCallExit(output []byte, gasUsed uint64, err error) {
-	// Match native tracer: compute depth before any operations
-	depth := t.callStack.Depth() - 1 // -1 because we haven't popped yet
 	reverted := err != nil
-
-	// Delegate to native validator before any processing
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
-	}
 
 	// Handle SELFDESTRUCT exit (matching native tracer firehose.go:1420-1429)
 	// Geth native tracer calls OnEnter(SELFDESTRUCT)/OnExit(), but we don't create a call for it
 	// We must skip this OnExit call because we didn't push it on our CallStack
 	if t.latestCallEnterSuicided {
-		firehoseTrace("skipping OnCallExit for SELFDESTRUCT opcode (latestCallEnterSuicided=true)")
+		// For SELFDESTRUCT, we need to call the native validator with the depth
+		// that was passed to OnCallEnter, not the depth computed from the call stack
+		if t.nativeValidator != nil {
+			t.nativeValidator.OnCallExit(t.latestCallEnterSuicidedDepth, output, gasUsed, err, reverted)
+		}
+
+		firehoseTrace("skipping OnCallExit for SELFDESTRUCT opcode (latestCallEnterSuicided=true, depth=%d)", t.latestCallEnterSuicidedDepth)
 		t.latestCallEnterSuicided = false
 		return
+	}
+
+	// Match native tracer: compute depth before any operations
+	depth := t.callStack.Depth() - 1 // -1 because we haven't popped yet
+
+	// Delegate to native validator before any processing
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
 	}
 
 	// Ensure we're in a valid state (matching native tracer line 1431)
@@ -1370,6 +1368,11 @@ func (t *Tracer) OnSystemCallEnd() {
 
 // OnOpcode is called for each opcode (optional, for detailed tracing)
 func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScopeData, rData []byte, depth int, err error) {
+	// Call native validator if present
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnOpcode(pc, op, gas, cost, depth)
+	}
+
 	call := t.callStack.Peek()
 	if call == nil {
 		return
@@ -1389,6 +1392,11 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScop
 // This is typically called during KECCAK256 opcode execution
 // The preimage is the input data that was used to produce the given keccak hash
 func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
+	// Call native validator if present
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnKeccakPreimage(hash, preimage)
+	}
+
 	t.ensureInBlockAndInTrxAndInCall()
 
 	call := t.callStack.Peek()
@@ -1406,55 +1414,6 @@ func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 	call.KeccakPreimages[hex.EncodeToString(hash[:])] = hex.EncodeToString(preimage)
 
 	firehoseTrace("keccak preimage (hash=%x preimage_len=%d)", hash, len(preimage))
-}
-
-// OnNewAccount is called when a new account is created
-// Note: This is a legacy hook that some chains may need
-// Modern Firehose doesn't track this (use OnCodeChange instead)
-// Set ignoreSystemAddress=true for Ethereum mainnet/testnets, false for BSC/Polygon
-func (t *Tracer) OnNewAccount(addr [20]byte, ignoreSystemAddress bool) {
-	t.ensureInBlockOrTrx()
-
-	// If not in transaction, we're in block finalization
-	// Old Firehose didn't track these, so we just advance ordinal
-	if t.transaction == nil {
-		t.blockOrdinal.Next()
-		return
-	}
-
-	// Ignore account creations in static calls to precompiled contracts
-	if call := t.callStack.Peek(); call != nil {
-		if call.CallType == pbeth.CallType_STATIC {
-			// Check if calling a precompiled address
-			var callAddr [20]byte
-			copy(callAddr[:], call.Address)
-			if t.blockIsPrecompiledAddr(callAddr) {
-				// Old Firehose ignored these
-				return
-			}
-		}
-	}
-
-	// System address (0xfffffffffffffffffffffffffffffffffffffffe)
-	// Ethereum mainnet/testnets ignore it, but BSC/Polygon track it
-	systemAddr := [20]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe}
-	if addr == systemAddr && ignoreSystemAddress {
-		return
-	}
-
-	accountCreation := &pbeth.AccountCreation{
-		Account: addr[:],
-		Ordinal: t.blockOrdinal.Next(),
-	}
-
-	activeCall := t.callStack.Peek()
-	if activeCall == nil {
-		t.deferredCallState.AddAccountCreation(accountCreation)
-		return
-	}
-
-	activeCall.AccountCreations = append(activeCall.AccountCreations, accountCreation)
 }
 
 // OnOpcodeFault is called when an opcode execution fails

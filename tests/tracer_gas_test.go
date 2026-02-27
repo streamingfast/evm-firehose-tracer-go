@@ -20,7 +20,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 	t.Run("gas_change_no_change_ignored", func(t *testing.T) {
 		// Gas changes where old == new should be ignored
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			GasChange(100000, 100000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			EndCall([]byte{}, 100000, nil).
@@ -37,7 +37,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 	t.Run("gas_change_with_active_call", func(t *testing.T) {
 		// Normal gas change during active call
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			GasChange(100000, 90000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			EndCall([]byte{}, 90000, nil).
@@ -59,7 +59,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 		// Gas change before call stack initialization (deferred state)
 		// This happens for initial gas balance
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			GasChange(0, 21000, pbeth.GasChange_REASON_TX_INITIAL_BALANCE).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
@@ -80,7 +80,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 	t.Run("multiple_gas_changes_in_transaction", func(t *testing.T) {
 		// Multiple gas changes in same transaction
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			GasChange(100000, 90000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			GasChange(90000, 80000, pbeth.GasChange_REASON_CODE_STORAGE).
@@ -115,7 +115,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 	t.Run("gas_changes_across_multiple_calls", func(t *testing.T) {
 		// Gas changes in nested calls
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			GasChange(200000, 180000, pbeth.GasChange_REASON_CONTRACT_CREATION).
 			StartCallRaw(1, byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
@@ -171,7 +171,7 @@ func TestTracer_GasChangeReasons(t *testing.T) {
 	for _, reason := range reasons {
 		t.Run(reason.String(), func(t *testing.T) {
 			NewTracerTester(t).
-				StartBlockTrxNoHooks().
+				StartBlockTrx(TestLegacyTrx).
 				StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 				GasChange(100000, 90000, reason).
 				EndCall([]byte{}, 90000, nil).

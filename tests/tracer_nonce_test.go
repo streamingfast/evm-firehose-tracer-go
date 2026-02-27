@@ -12,7 +12,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 	t.Run("nonce_change_with_active_call", func(t *testing.T) {
 		// Nonce change during active call execution
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 5, 6).
 			EndCall([]byte{}, 21000, nil).
@@ -32,7 +32,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 	t.Run("nonce_change_deferred_state", func(t *testing.T) {
 		// Nonce change before call stack initialization (deferred)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// Nonce change BEFORE call starts
 			NonceChange(AliceAddr, 5, 6).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
@@ -54,7 +54,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 	t.Run("multiple_nonce_changes_in_call", func(t *testing.T) {
 		// Multiple nonce changes in same call (unusual but possible)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 5, 6).
 			NonceChange(BobAddr, 10, 11).
@@ -89,7 +89,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 	t.Run("nonce_change_zero_to_one", func(t *testing.T) {
 		// Test the common case of first nonce increment (0 -> 1)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 0, 1).
 			EndCall([]byte{}, 21000, nil).

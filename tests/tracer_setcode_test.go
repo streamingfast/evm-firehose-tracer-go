@@ -24,7 +24,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		// EIP-7702: Authorization application happens BEFORE the root call
 		// The authorizer's nonce is incremented when the authorization is applied
@@ -75,7 +75,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		tester.
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
@@ -110,7 +110,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		// NOTE: We do NOT add a nonce change for Alice
 		// This simulates the authorization not being applied (e.g., wrong nonce, already applied, etc.)
@@ -157,7 +157,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		// Add nonce changes for Alice and Bob (they get applied)
 		// Charlie's authorization does NOT get applied (no nonce change)
@@ -201,7 +201,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		tester.
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
@@ -231,7 +231,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		// Nonce change exists but doesn't match authorization's expected nonce
 		tester.NonceChange(AliceAddr, 5, 6) // Wrong nonce range
@@ -275,7 +275,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		// Only ONE nonce change for Alice (0→1)
 		// Both authorizations are from Alice with nonce=0, but only one can match
@@ -334,7 +334,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent)
+		tester.Tracer.OnTxStart(txEvent, tester.stateReader)
 
 		tester.NonceChange(AliceAddr, 0, 1)
 

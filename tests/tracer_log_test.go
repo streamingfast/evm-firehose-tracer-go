@@ -17,7 +17,7 @@ func TestTracer_OnLog(t *testing.T) {
 		var topics [][32]byte // Empty topics
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000, nil).
@@ -44,7 +44,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics := [][32]byte{hash32(100)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000, nil).
@@ -68,7 +68,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics := [][32]byte{hash32(100), hash32(200)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000, nil).
@@ -93,7 +93,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics := [][32]byte{hash32(100), hash32(200), hash32(300)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000, nil).
@@ -119,7 +119,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics := [][32]byte{hash32(100), hash32(200), hash32(300), hash32(400)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000, nil).
@@ -150,7 +150,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics3 := [][32]byte{hash32(300)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics1, data1, 0).
 			Log(BobAddr, topics2, data2, 1).
@@ -186,7 +186,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics2 := [][32]byte{hash32(200)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			Log(BobAddr, topics1, data1, 0).
 			StartCallRaw(1, byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
@@ -218,7 +218,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics := [][32]byte{hash32(100)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, emptyData, 0).
 			EndCall([]byte{}, 90000, nil).
@@ -245,7 +245,7 @@ func TestTracer_OnLog(t *testing.T) {
 		topics := [][32]byte{hash32(100)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, largeData, 0).
 			EndCall([]byte{}, 90000, nil).
@@ -271,7 +271,7 @@ func TestTracer_OnLog(t *testing.T) {
 		data := []byte{0x01}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000, nil).

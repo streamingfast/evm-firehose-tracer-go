@@ -1,6 +1,7 @@
 package firehose
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -851,4 +852,58 @@ func (s *mockStateDB) RevertToSnapshot(int) {}
 // toCommonHash converts a [32]byte to common.Hash
 func toCommonHash(hash [32]byte) common.Hash {
 	return common.Hash(hash)
+}
+
+// SetTestingMockStateCode sets the code for an address in the mock StateDB
+func SetTestingMockStateCode(nv interface{}, addr common.Address, code []byte) {
+	if v, ok := nv.(*nativeValidator); ok {
+		v.stateDB.SetCode(addr, code)
+	}
+}
+
+// SetTestingMockStateNonce sets the nonce for an address in the mock StateDB
+func SetTestingMockStateNonce(nv interface{}, addr common.Address, nonce uint64) {
+	if v, ok := nv.(*nativeValidator); ok {
+		v.stateDB.SetNonce(addr, nonce)
+	}
+}
+
+// SetTestingMockStateExist sets whether an address exists in the mock StateDB
+func SetTestingMockStateExist(nv interface{}, addr common.Address, exists bool) {
+	if v, ok := nv.(*nativeValidator); ok {
+		v.stateDB.SetExist(addr, exists)
+	}
+}
+
+// GetTestingNativeValidatorBuffer returns the native validator's internal testing buffer
+func GetTestingNativeValidatorBuffer(nv interface{}) *bytes.Buffer {
+	if v, ok := nv.(*nativeValidator); ok {
+		return v.tracer.InternalTestingBuffer()
+	}
+	return nil
+}
+
+// SetTestingNativeValidator sets the native validator for testing purposes
+func (t *Tracer) SetTestingNativeValidator(nv interface{}) {
+	if v, ok := nv.(*nativeValidator); ok {
+		t.nativeValidator = v
+	}
+}
+
+// GetTestingNativeValidator returns the native validator for testing purposes
+func (t *Tracer) GetTestingNativeValidator() interface{} {
+	return t.nativeValidator
+}
+
+// NewTestingNativeValidator creates a new native validator for testing
+func NewTestingNativeValidator(config string) (interface{}, error) {
+	return newNativeValidator(config)
+}
+
+// GetTestingStateDB returns the mockStateDB from a native validator for testing
+func GetTestingStateDB(nv interface{}) interface{} {
+	if v, ok := nv.(*nativeValidator); ok {
+		return v.stateDB
+	}
+	return nil
 }

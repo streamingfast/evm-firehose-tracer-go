@@ -16,28 +16,6 @@ import (
 type BlockEvent struct {
 	Block     BlockData
 	Finalized *FinalizedBlockRef
-
-	// Precompile Detection (at least one should be provided by chain implementation)
-	// The chain implementation should provide precompile information since it varies by:
-	// - Chain type (Ethereum, BSC, Polygon, etc.)
-	// - Fork rules (Istanbul adds blake2f, Cancun adds point evaluation, etc.)
-	// - Custom chain precompiles
-	//
-	// Option 1: Provide a pre-built checker function
-	IsPrecompiledAddr func(addr [20]byte) bool
-	//
-	// Option 2: Provide the list of addresses (tracer will build the checker)
-	ActivePrecompiles [][20]byte
-	//
-	// If neither is provided, all addresses will be treated as non-precompiled.
-	//
-	// Example for go-ethereum integration:
-	//   import "github.com/ethereum/go-ethereum/core/vm"
-	//   activePrecompiles := vm.ActivePrecompiles(blockRules)
-	//   event.ActivePrecompiles = make([][20]byte, len(activePrecompiles))
-	//   for i, addr := range activePrecompiles {
-	//       event.ActivePrecompiles[i] = addr
-	//   }
 }
 
 // BlockData contains the minimal block data needed by the tracer
@@ -126,11 +104,6 @@ type TxEvent struct {
 
 	// EIP-7702 set code authorization list (type 4)
 	SetCodeAuthorizations []SetCodeAuthorization
-
-	// StateReader provides read-only access to blockchain state during transaction execution
-	// Required for EIP-7702 delegation detection, CREATE address calculation, etc.
-	// Blockchain implementations must provide this (e.g., from EVM StateDB)
-	StateReader StateReader
 }
 
 // AccessList represents EIP-2930 access list

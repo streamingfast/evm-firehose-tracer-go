@@ -17,7 +17,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// This tests the early return path at tracer.go:636-640
 		// Note: Receipt is provided but NOT populated when calls array is empty (early return)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// No calls added - simulate bad block
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -42,7 +42,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Scenario: Transaction completes without receipt (error case)
 		// This tests the receipt == nil path at tracer.go:672
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{0x42}, 95000, nil).
 			EndBlockTrx(nil, nil, nil). // No receipt
@@ -72,7 +72,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Scenario: Transaction reverts but no receipt (error case)
 		// Verifies that reverted status is still set even without receipt
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCallReverted([]byte("error"), 95000, "execution reverted").
 			EndBlockTrx(nil, nil, nil). // No receipt
@@ -97,7 +97,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		returnData := []byte{0xde, 0xad, 0xbe, 0xef}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall(returnData, 95000, nil).
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -117,7 +117,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 	t.Run("empty_return_data", func(t *testing.T) {
 		// Scenario: Empty return data should be handled correctly
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{}, 95000, nil). // Empty return data
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -132,7 +132,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 	t.Run("nil_return_data", func(t *testing.T) {
 		// Scenario: Nil return data should be handled correctly
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall(nil, 95000, nil). // Nil return data
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -150,7 +150,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Scenario: EndOrdinal should always be set, even for failed transactions
 		// This tests tracer.go:698
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCallReverted([]byte("error"), 95000, "execution reverted").
 			EndBlockTrx(failedReceipt(100000), nil, nil).
@@ -170,7 +170,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Note: This is tested via system call tests, which have multiple transactions
 		// Simplified test here just verifies the concept
 		NewTracerTester(t).
-			StartBlockTrx().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{0x01}).
 			EndCall([]byte{}, 45000, nil).
 			EndBlockTrx(successReceipt(50000), nil, nil).
@@ -202,7 +202,7 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 		}
 
 		tester := NewTracerTester(t)
-		tester.StartBlockTrxNoHooks()
+		tester.StartBlockTrx(TestLegacyTrx)
 
 		// Set transaction type to blob (type 3)
 		tester.Tracer.GetTestingTransaction().Type = pbeth.TransactionTrace_TRX_TYPE_BLOB
@@ -231,7 +231,7 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 	t.Run("non_blob_transaction_no_blob_gas", func(t *testing.T) {
 		// Scenario: Non-blob transaction should not have blob gas fields
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{}, 95000, nil).
 			EndBlockTrx(successReceipt(100000), nil, nil).

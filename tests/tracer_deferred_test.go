@@ -18,7 +18,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("balance_change_before_root_call", func(t *testing.T) {
 		// Balance change occurs before root call starts (deferred to root call)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
@@ -37,7 +37,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("balance_change_after_root_call", func(t *testing.T) {
 		// Balance change occurs after root call ends (deferred to root call)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			// Balance change AFTER call ends but before transaction ends
@@ -61,7 +61,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("balance_changes_mixed_before_during_after", func(t *testing.T) {
 		// Balance changes: before call, during call, after call
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// BEFORE: Gas buy
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
@@ -103,7 +103,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("nonce_change_before_root_call", func(t *testing.T) {
 		// Nonce change before call starts (e.g., EIP-7702 SetCode)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			NonceChange(AliceAddr, 0, 1).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
@@ -123,7 +123,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("nonce_change_after_root_call", func(t *testing.T) {
 		// Nonce change after call ends
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			NonceChange(AliceAddr, 5, 6).
@@ -143,7 +143,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("nonce_changes_mixed_before_during_after", func(t *testing.T) {
 		// Nonce changes: before, during, after call
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// BEFORE: EIP-7702 SetCode nonce increment
 			NonceChange(AliceAddr, 0, 1).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
@@ -181,7 +181,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		oldCode := []byte{0x60, 0x00}
 		newCode := []byte{0x60, 0x01, 0x60, 0x02}
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
@@ -203,7 +203,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		oldCode := []byte{}
 		newCode := []byte{0x60, 0x03}
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			CodeChange(CharlieAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
@@ -230,7 +230,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		code3New := []byte{0x60, 0x04}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// BEFORE: EIP-7702 SetCode
 			CodeChange(AliceAddr, hashBytes(code1Old), hashBytes(code1New), code1Old, code1New).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
@@ -264,7 +264,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("gas_change_before_root_call", func(t *testing.T) {
 		// Gas change before call starts (intrinsic gas)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			GasChange(21000, 0, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
@@ -284,7 +284,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("gas_change_after_root_call", func(t *testing.T) {
 		// Gas change after call ends (gas refund)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			GasChange(0, 5000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
@@ -304,7 +304,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	t.Run("gas_changes_mixed_before_during_after", func(t *testing.T) {
 		// Gas changes: before, during, after call
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// BEFORE: Intrinsic gas
 			GasChange(50000, 29000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 50000, []byte{}).
@@ -341,7 +341,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		newCode := []byte{0x60, 0x00}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
 			NonceChange(AliceAddr, 0, 1).
 			CodeChange(AliceAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
@@ -367,7 +367,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		newCode := []byte{0x60, 0x02}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			BalanceChange(AliceAddr, bigInt(790), bigInt(800), pbeth.BalanceChange_REASON_GAS_REFUND).
@@ -397,7 +397,7 @@ func TestTracer_DeferredCallState(t *testing.T) {
 		code3New := []byte{0x60, 0x03}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// === BEFORE ROOT CALL ===
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
 			NonceChange(AliceAddr, 0, 1).

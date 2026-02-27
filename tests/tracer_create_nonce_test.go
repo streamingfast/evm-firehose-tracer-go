@@ -17,7 +17,7 @@ func TestTracer_CREATE_AddressCalculation(t *testing.T) {
 
 		NewTracerTester(t).
 			SetMockStateNonce(AliceAddr, 0).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, AddrBytes(expectedAddr), bigInt(0), 53000, []byte{0x60, 0x80}).
 			EndCall([]byte{}, 50000, nil).
 			EndBlockTrx(successReceipt(53000), nil, nil).
@@ -36,7 +36,7 @@ func TestTracer_CREATE_AddressCalculation(t *testing.T) {
 
 		NewTracerTester(t).
 			SetMockStateNonce(AliceAddr, 5).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, AddrBytes(expectedAddr), bigInt(0), 53000, []byte{0x60, 0x80}).
 			EndCall([]byte{}, 50000, nil).
 			EndBlockTrx(successReceipt(53000), nil, nil).

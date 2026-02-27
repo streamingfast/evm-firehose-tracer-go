@@ -14,7 +14,7 @@ import (
 func TestTracer_TxTypes(t *testing.T) {
 	t.Run("legacy", func(t *testing.T) {
 		NewTracerTester(t).
-			StartBlockLegacyTrx().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -36,7 +36,7 @@ func TestTracer_TxTypes(t *testing.T) {
 
 	t.Run("access_list", func(t *testing.T) {
 		NewTracerTester(t).
-			StartBlockAccessListTrx().
+			StartBlockTrx(TestAccessListTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -62,7 +62,7 @@ func TestTracer_TxTypes(t *testing.T) {
 
 	t.Run("dynamic_fee", func(t *testing.T) {
 		NewTracerTester(t).
-			StartBlockDynamicFeeTrx().
+			StartBlockTrx(TestDynamicFeeTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -92,7 +92,7 @@ func TestTracer_TxTypes(t *testing.T) {
 
 	t.Run("blob", func(t *testing.T) {
 		NewTracerTester(t).
-			StartBlockBlobTrx().
+			StartBlockTrx(TestBlobTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -121,13 +121,13 @@ func TestTracer_TxTypes(t *testing.T) {
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
 		require.NoError(t, err)
 
-		txEvent := new(TxEventBuilder).
-			Defaults().
-			Type(TxTypeSetCode).
-			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
-			Build()
-
-		tester := NewTracerTester(t).startBlockTrxWithEvent(txEvent)
+		tester := NewTracerTester(t).StartBlockTrx(
+			new(TxEventBuilder).
+				Defaults().
+				Type(TxTypeSetCode).
+				SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+				Build(),
+		)
 
 		// EIP-7702: Authorization application happens BEFORE the root call
 		// The authorizer's nonce is incremented when the authorization is applied

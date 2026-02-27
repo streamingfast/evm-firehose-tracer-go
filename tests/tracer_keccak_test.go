@@ -20,7 +20,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 		hash := hashBytes(preimage) // Compute actual keccak256
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).
 			EndCall([]byte{}, 95000, nil).
@@ -51,7 +51,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 		hash3 := hashBytes(preimage3)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash1, preimage1).
 			Keccak(hash2, preimage2).
@@ -81,7 +81,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 		hashChild := hashBytes(preimageChild)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hashParent, preimageParent).
 			StartCall(1, BobAddr, CharlieAddr, bigInt(0), 50000, []byte{0x02}).
@@ -113,7 +113,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 		hash := hashBytes(preimage)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).
 			EndCall([]byte{}, 95000, nil).
@@ -141,7 +141,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 		hash := hashBytes(preimage)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).
 			EndCall([]byte{}, 95000, nil).
@@ -174,7 +174,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 		hash := hashBytes(preimage)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).                                                    // Contract computes storage slot
 			StorageChange(BobAddr, hash, firehose.EmptyHash, hashBytes([]byte{0x01})). // Then writes to that slot

@@ -17,7 +17,7 @@ func TestTracer_Suicide(t *testing.T) {
 		contractBalance := bigInt(500)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob (contract) self-destructs, sending balance to Charlie
 			Suicide(BobAddr, CharlieAddr, contractBalance).
@@ -56,7 +56,7 @@ func TestTracer_Suicide(t *testing.T) {
 		contractBalance := bigInt(1000)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob self-destructs to itself
 			Suicide(BobAddr, BobAddr, contractBalance).
@@ -89,7 +89,7 @@ func TestTracer_Suicide(t *testing.T) {
 	t.Run("suicide_with_zero_balance", func(t *testing.T) {
 		// Contract with zero balance suicides
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob has zero balance
 			Suicide(BobAddr, CharlieAddr, bigInt(0)).
@@ -124,7 +124,7 @@ func TestTracer_Suicide(t *testing.T) {
 		contractBalance := bigInt(750)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			// Bob calls Charlie
 			StartCall(1, BobAddr, CharlieAddr, bigInt(0), 100000, []byte{}).
@@ -166,7 +166,7 @@ func TestTracer_Suicide(t *testing.T) {
 		balance2 := bigInt(200)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 300000, []byte{}).
 			// First suicide: Bob → Charlie
 			Suicide(BobAddr, CharlieAddr, balance1).
@@ -204,7 +204,7 @@ func TestTracer_Suicide(t *testing.T) {
 		var zeroVal [32]byte
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			// Storage change before suicide
 			StorageChange(BobAddr, storageKey, zeroVal, storageValue).
@@ -243,7 +243,7 @@ func TestTracer_Suicide(t *testing.T) {
 		contractBalance := bigInt(500)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Suicide(BobAddr, CharlieAddr, contractBalance).
 			EndCall([]byte{}, 50000, nil).

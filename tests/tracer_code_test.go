@@ -16,7 +16,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 		var prevHash [32]byte // Empty for new deployment
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, code).
 			EndCall([]byte{}, 90000, nil).
@@ -42,7 +42,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 		var prevHash [32]byte
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			// Code change BEFORE call starts (EIP-7702 authorization)
 			CodeChange(AliceAddr, prevHash, codeHash, nil, code).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
@@ -89,7 +89,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 		newHash := hash32(222)
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, oldHash, newHash, oldCode, newCode).
 			EndCall([]byte{}, 90000, nil).
@@ -116,7 +116,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 		var prevHash [32]byte
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			CodeChange(CharlieAddr, prevHash, hash1, nil, code1).
 			CodeChange(BobAddr, prevHash, hash2, nil, code2).
@@ -144,7 +144,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 		var prevHash [32]byte
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, code).
 			EndCall([]byte{}, 90000, nil).
@@ -173,7 +173,7 @@ func TestTracer_OnCodeChange(t *testing.T) {
 		var prevHash [32]byte
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, emptyCode).
 			EndCall([]byte{}, 90000, nil).

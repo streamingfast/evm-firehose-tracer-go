@@ -11,7 +11,7 @@ import (
 func TestTracer_Call(t *testing.T) {
 	t.Run("simple", func(t *testing.T) {
 		NewTracerTester(t).
-			StartBlockTrx().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).

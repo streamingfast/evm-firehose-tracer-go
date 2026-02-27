@@ -22,7 +22,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 		var prevHash [32]byte
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(1000000), 200000, []byte{}). // 1 ETH value transfer
 			// Balance changes during value transfer
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9000000), pbeth.BalanceChange_REASON_TRANSFER).
@@ -67,7 +67,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 		logTopics := [][32]byte{hash32(200)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, deployedCode).
 			StorageChange(BobAddr, storageKey, zeroVal, storageVal).
@@ -116,7 +116,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 		logTopics := [][32]byte{hash32(300)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(500000), 300000, []byte{}).
 			// All state change types
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9500000), pbeth.BalanceChange_REASON_TRANSFER).
@@ -172,7 +172,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 		logTopics := [][32]byte{hash32(400)}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 300000, []byte{}).
 			// Root call: balance change
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9900000), pbeth.BalanceChange_REASON_TRANSFER).

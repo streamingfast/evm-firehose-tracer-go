@@ -129,7 +129,6 @@ type TxEventBuilder struct {
 	blobGasFeeCap         *big.Int
 	blobHashes            [][32]byte
 	setCodeAuthorizations []firehose.SetCodeAuthorization
-	stateReader           firehose.StateReader
 }
 
 // Type sets the transaction type
@@ -228,12 +227,6 @@ func (t *TxEventBuilder) SetCodeAuthorizations(authList []firehose.SetCodeAuthor
 	return t
 }
 
-// StateReader sets the state reader for blockchain state access
-func (t *TxEventBuilder) StateReader(stateReader firehose.StateReader) *TxEventBuilder {
-	t.stateReader = stateReader
-	return t
-}
-
 // Defaults sets common default values for testing:
 // - Type: Legacy (0)
 // - Hash: Zero hash (usually computed by native validator)
@@ -279,7 +272,6 @@ func (t *TxEventBuilder) Build() firehose.TxEvent {
 		BlobGasFeeCap:         t.blobGasFeeCap,
 		BlobHashes:            t.blobHashes,
 		SetCodeAuthorizations: t.setCodeAuthorizations,
-		StateReader:           t.stateReader,
 	}
 }
 

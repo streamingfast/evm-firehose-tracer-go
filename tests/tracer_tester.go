@@ -1,7 +1,6 @@
 package tests
 
 import (
-	firehose "github.com/streamingfast/evm-firehose-tracer-go"
 	"bufio"
 	"bytes"
 	"encoding/base64"
@@ -10,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	firehose "github.com/streamingfast/evm-firehose-tracer-go"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -102,8 +103,8 @@ var TestDynamicFeeTrx = new(TxEventBuilder).
 	To(Bob).
 	Value(bigInt(100)).
 	Gas(21000).
-	GasPrice(bigInt(10)).             // Effective gas price
-	MaxFeePerGas(bigInt(20)).         // Max fee willing to pay
+	GasPrice(bigInt(10)).            // Effective gas price
+	MaxFeePerGas(bigInt(20)).        // Max fee willing to pay
 	MaxPriorityFeePerGas(bigInt(2)). // Priority fee (tip to miner)
 	AccessList(firehose.AccessList{
 		{Address: BobAddr, StorageKeys: [][32]byte{hashFromHex("0x01")}},
@@ -154,9 +155,6 @@ var TestSetCodeTrx = new(TxEventBuilder).
 	}).
 	Nonce(0).
 	Build()
-
-// TestTrx is the default test transaction (legacy type for backward compatibility)
-var TestTrx = TestLegacyTrx
 
 // TracerTester provides a fluent API for building test testers
 type TracerTester struct {
@@ -218,11 +216,6 @@ func toCommonAddress(addr [20]byte) common.Address {
 	return common.Address(addr)
 }
 
-// toCommonHash converts a [32]byte hash to common.Hash
-func toCommonHash(hash [32]byte) common.Hash {
-	return common.Hash(hash)
-}
-
 // SetMockStateCode sets the code for an address in the mock StateDB
 // This allows testing code paths that depend on StateDB.GetCode()
 func (s *TracerTester) SetMockStateCode(addr [20]byte, code []byte) *TracerTester {
@@ -258,83 +251,16 @@ func (s *TracerTester) StartBlock() *TracerTester {
 	return s
 }
 
-// StartBlockTrx starts a block and a transaction with standard Ethereum initialization
-// This emits the state changes that happen at transaction start:
-// - Nonce increment
-// - Gas buying (balance decrease)
-// - Gas initialization
-// Uses TestTrx (legacy transaction) by default
-func (s *TracerTester) StartBlockTrx() *TracerTester {
-	return s.startBlockTrxWithEvent(TestTrx)
-}
-
-// StartBlockLegacyTrx starts a block and a legacy (type 0) transaction
-func (s *TracerTester) StartBlockLegacyTrx() *TracerTester {
-	return s.startBlockTrxWithEvent(TestLegacyTrx)
-}
-
-// StartBlockAccessListTrx starts a block and an EIP-2930 access list (type 1) transaction
-func (s *TracerTester) StartBlockAccessListTrx() *TracerTester {
-	return s.startBlockTrxWithEvent(TestAccessListTrx)
-}
-
-// StartBlockDynamicFeeTrx starts a block and an EIP-1559 dynamic fee (type 2) transaction
-func (s *TracerTester) StartBlockDynamicFeeTrx() *TracerTester {
-	return s.startBlockTrxWithEvent(TestDynamicFeeTrx)
-}
-
-// StartBlockBlobTrx starts a block and an EIP-4844 blob (type 3) transaction
-func (s *TracerTester) StartBlockBlobTrx() *TracerTester {
-	return s.startBlockTrxWithEvent(TestBlobTrx)
-}
-
-// StartBlockSetCodeTrx starts a block and an EIP-7702 set code (type 4) transaction
-func (s *TracerTester) StartBlockSetCodeTrx() *TracerTester {
-	return s.startBlockTrxWithEvent(TestSetCodeTrx)
-}
-
-// StartBlockTrxNoHooks starts a block and transaction WITHOUT automatic hooks
-// This is useful for testing specific state changes in isolation without the
-// automatic nonce increment, gas buy, and gas initialization that StartBlockTrx adds.
-// Uses TestTrx (legacy transaction) by default.
-func (s *TracerTester) StartBlockTrxNoHooks() *TracerTester {
+// StartBlockTrx starts a block and a transaction
+func (s *TracerTester) StartBlockTrx(tx firehose.TxEvent) *TracerTester {
 	s.Tracer.OnBlockStart(TestBlock)
-	tx := TestTrx
-	tx.StateReader = s.stateReader
-	s.Tracer.OnTxStart(tx)
+	s.Tracer.OnTxStart(tx, s.stateReader)
 	return s
 }
 
-// StartTrxNoHooks starts a transaction WITHOUT starting a block or automatic hooks
-// Use this when you've already started a block (e.g., after system calls)
-func (s *TracerTester) StartTrxNoHooks() *TracerTester {
-	tx := TestTrx
-	tx.StateReader = s.stateReader
-	s.Tracer.OnTxStart(tx)
-	return s
-}
-
-// startBlockTrxWithEvent is the internal implementation for starting a block with a specific transaction
-func (s *TracerTester) startBlockTrxWithEvent(tx firehose.TxEvent) *TracerTester {
-	s.Tracer.OnBlockStart(TestBlock)
-	tx.StateReader = s.stateReader
-	s.Tracer.OnTxStart(tx)
-
-	// Standard Ethereum transaction initialization hooks
-	from := tx.From
-
-	// 1. Nonce change: increment sender's nonce
-	s.Tracer.OnNonceChange(from, tx.Nonce, tx.Nonce+1)
-
-	// 2. Gas buy: sender pays upfront gas cost (gas * gasPrice)
-	gasCost := new(big.Int).Mul(new(big.Int).SetUint64(tx.Gas), tx.GasPrice)
-	oldBalance := bigInt(1000000) // Assume sender has 1M wei
-	newBalance := new(big.Int).Sub(oldBalance, gasCost)
-	s.Tracer.OnBalanceChange(from, oldBalance, newBalance, pbeth.BalanceChange_REASON_GAS_BUY)
-
-	// 3. Gas initialization: set initial gas for transaction
-	s.Tracer.OnGasChange(0, tx.Gas, pbeth.GasChange_REASON_TX_INITIAL_BALANCE)
-
+// StartTrx starts a transaction without starting a block. Use this for testing transaction tracing in isolation.
+func (s *TracerTester) StartTrx(tx firehose.TxEvent) *TracerTester {
+	s.Tracer.OnTxStart(tx, s.stateReader)
 	return s
 }
 
@@ -387,14 +313,9 @@ func (s *TracerTester) EndCall(output []byte, gasUsed uint64, err error) *Tracer
 // This ensures both shared and native tracers set ExecutedCode correctly
 func (s *TracerTester) OpCode(pc uint64, op byte, gas, cost uint64) *TracerTester {
 	// Call shared tracer's OnOpcode with empty scope data
+	// This will call the native validator internally if present
 	emptyScope := firehose.OpcodeScopeData{}
 	s.Tracer.OnOpcode(pc, op, gas, cost, emptyScope, nil, 0, nil)
-
-	// Also call native validator's OnOpcode if present (different signature)
-	nv := s.Tracer.GetTestingNativeValidator()
-	if nv != nil {
-		firehose.CallTestingNativeValidatorOnOpcode(nv, pc, op, gas, cost, 0)
-	}
 
 	return s
 }
@@ -403,13 +324,8 @@ func (s *TracerTester) OpCode(pc uint64, op byte, gas, cost uint64) *TracerTeste
 // This ensures both shared and native tracers store keccak preimages correctly
 func (s *TracerTester) Keccak(hash [32]byte, preimage []byte) *TracerTester {
 	// Call shared tracer's OnKeccakPreimage
+	// This will call the native validator internally if present
 	s.Tracer.OnKeccakPreimage(hash, preimage)
-
-	// Also call native validator's OnKeccakPreimage if present
-	nv := s.Tracer.GetTestingNativeValidator()
-	if nv != nil {
-		firehose.CallTestingNativeValidatorOnKeccakPreimage(nv, hash, preimage)
-	}
 
 	return s
 }
@@ -508,11 +424,10 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 		firehose.SetTestingCallExecutedCode(activeCall, true) // Set by captureInterpreterStep in native tracer
 	}
 
-	// Call OnOpcode for native validator to mark its call as suicided and executed
-	nv := s.Tracer.GetTestingNativeValidator()
-	if nv != nil {
-		firehose.CallTestingNativeValidatorOnOpcode(nv, 0, 0xff, 0, 0, activeCallDepth) // op=0xff is SELFDESTRUCT
-	}
+	// Call shared tracer's OnOpcode to mark the call as suicided and executed
+	// This will also call the native validator internally if present
+	emptyScope := firehose.OpcodeScopeData{}
+	s.Tracer.OnOpcode(0, 0xff, 0, 0, emptyScope, nil, activeCallDepth, nil) // op=0xff is SELFDESTRUCT
 
 	// Step 2: Trigger OnCallEnter(SELFDESTRUCT) at depth = active_call_depth + 1
 	// This sets latestCallEnterSuicided flag (matching firehose.go:1040-1041)
@@ -521,11 +436,11 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 	s.Tracer.OnCallEnter(
 		selfDestructDepth,
 		byte(firehose.CallTypeSelfDestruct),
-		contractAddr,      // from: contract being destructed
-		beneficiaryAddr,   // to: beneficiary receiving balance
-		[]byte{},          // input: empty for SELFDESTRUCT
-		0,                 // gas: not relevant for SELFDESTRUCT
-		contractBalance,   // value: contract balance being transferred
+		contractAddr,    // from: contract being destructed
+		beneficiaryAddr, // to: beneficiary receiving balance
+		[]byte{},        // input: empty for SELFDESTRUCT
+		0,               // gas: not relevant for SELFDESTRUCT
+		contractBalance, // value: contract balance being transferred
 	)
 
 	// Apply balance changes in the order Ethereum emits them:
@@ -555,19 +470,11 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 	)
 
 	// Geth calls OnCallExit for SELFDESTRUCT at the same depth as OnCallEnter
-	// The Firehose tracer will check latestCallEnterSuicided and skip processing
-	// This clears the flag so subsequent OnCallExit (for the real call) works correctly
-	//
-	// We need to call the native validator directly with the correct depth,
-	// because the shared tracer's OnCallExit computes depth from callStack
-	if nv != nil {
-		firehose.CallTestingNativeValidatorOnCallExit(nv, selfDestructDepth, []byte{}, 0, nil, false)
-	}
-
-	// Also need to clear the flag in the shared tracer
-	if s.Tracer.GetTestingLatestCallEnterSuicided() {
-		s.Tracer.SetTestingLatestCallEnterSuicided(false)
-	}
+	// The shared tracer's OnCallExit will:
+	// - Call the native validator with the correct depth
+	// - Check latestCallEnterSuicided and skip processing
+	// - Clear the flag so subsequent OnCallExit (for the real call) works correctly
+	s.Tracer.OnCallExit([]byte{}, 0, nil)
 
 	return s
 }
@@ -598,7 +505,8 @@ func (s *TracerTester) EndSystemCall() *TracerTester {
 // - gasUsed: gas consumed by the call
 //
 // Example: Beacon root system call (EIP-4788)
-//   SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30000000, []byte{}, 50000)
+//
+//	SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30000000, []byte{}, 50000)
 func (s *TracerTester) SystemCall(from, to [20]byte, input []byte, gas uint64, output []byte, gasUsed uint64) *TracerTester {
 	s.Tracer.OnSystemCallStart()
 	s.Tracer.OnCallEnter(0, byte(firehose.CallTypeCall), from, to, input, gas, big.NewInt(0))
@@ -638,22 +546,22 @@ func (s *TracerTester) GenesisBlock(blockNumber uint64, blockHash [32]byte, allo
 	// Create a properly formed genesis block header that will hash deterministically
 	// We use the provided blockHash as the state root, and let go-ethereum compute the block hash from the header
 	header := &types.Header{
-		ParentHash:  common.Hash{},                          // Genesis has no parent
-		UncleHash:   common.Hash(emptyUncleHash),            // Standard empty uncle hash
-		Coinbase:    common.Address{},                       // Zero address
-		Root:        common.Hash(blockHash),                 // Use provided hash as state root (for testing)
-		TxHash:      common.Hash(emptyTxsHash),              // Standard empty transactions hash
-		ReceiptHash: common.Hash(emptyTxsHash),              // Standard empty receipts hash
-		Bloom:       types.Bloom{},                          // Empty bloom filter
-		Difficulty:  big.NewInt(0),                          // PoS blocks have zero difficulty
-		Number:      big.NewInt(int64(blockNumber)),         // Block number
-		GasLimit:    8000000,                                // Default gas limit
-		GasUsed:     0,                                      // Genesis has no gas used
-		Time:        0,                                      // Genesis time
-		Extra:       nil,                                    // No extra data
-		MixDigest:   common.Hash{},                          // Empty mix digest
-		Nonce:       types.BlockNonce{},                     // Empty nonce
-		BaseFee:     nil,                                    // No base fee for genesis
+		ParentHash:  common.Hash{},                  // Genesis has no parent
+		UncleHash:   common.Hash(emptyUncleHash),    // Standard empty uncle hash
+		Coinbase:    common.Address{},               // Zero address
+		Root:        common.Hash(blockHash),         // Use provided hash as state root (for testing)
+		TxHash:      common.Hash(emptyTxsHash),      // Standard empty transactions hash
+		ReceiptHash: common.Hash(emptyTxsHash),      // Standard empty receipts hash
+		Bloom:       types.Bloom{},                  // Empty bloom filter
+		Difficulty:  big.NewInt(0),                  // PoS blocks have zero difficulty
+		Number:      big.NewInt(int64(blockNumber)), // Block number
+		GasLimit:    8000000,                        // Default gas limit
+		GasUsed:     0,                              // Genesis has no gas used
+		Time:        0,                              // Genesis time
+		Extra:       nil,                            // No extra data
+		MixDigest:   common.Hash{},                  // Empty mix digest
+		Nonce:       types.BlockNonce{},             // Empty nonce
+		BaseFee:     nil,                            // No base fee for genesis
 	}
 
 	// Compute the actual block hash from the header using go-ethereum's native hash function
@@ -667,23 +575,23 @@ func (s *TracerTester) GenesisBlock(blockNumber uint64, blockHash [32]byte, allo
 	event := firehose.BlockEvent{
 		Block: firehose.BlockData{
 			Number:      blockNumber,
-			Hash:        [32]byte(computedHash),     // Use computed hash
-			ParentHash:  [32]byte{},                 // Genesis has no parent
-			UncleHash:   emptyUncleHash,             // Standard empty uncle hash
-			Coinbase:    [20]byte{},                 // Zero address
-			Root:        blockHash,                  // State root (provided by test)
-			TxHash:      emptyTxsHash,               // Standard empty transactions hash
-			ReceiptHash: emptyTxsHash,               // Standard empty receipts hash
-			Bloom:       make([]byte, 256),          // Empty 256-byte logs bloom filter
-			Difficulty:  big.NewInt(0),              // PoS blocks have zero difficulty
-			GasLimit:    8000000,                    // Default gas limit
-			GasUsed:     0,                          // Genesis has no gas used
+			Hash:        [32]byte(computedHash), // Use computed hash
+			ParentHash:  [32]byte{},             // Genesis has no parent
+			UncleHash:   emptyUncleHash,         // Standard empty uncle hash
+			Coinbase:    [20]byte{},             // Zero address
+			Root:        blockHash,              // State root (provided by test)
+			TxHash:      emptyTxsHash,           // Standard empty transactions hash
+			ReceiptHash: emptyTxsHash,           // Standard empty receipts hash
+			Bloom:       make([]byte, 256),      // Empty 256-byte logs bloom filter
+			Difficulty:  big.NewInt(0),          // PoS blocks have zero difficulty
+			GasLimit:    8000000,                // Default gas limit
+			GasUsed:     0,                      // Genesis has no gas used
 			Time:        0,
 			Extra:       nil,
 			MixDigest:   [32]byte{},
 			Nonce:       0,
 			BaseFee:     nil,
-			Size:        blockSize,                  // Computed RLP-encoded block size
+			Size:        blockSize, // Computed RLP-encoded block size
 		},
 	}
 

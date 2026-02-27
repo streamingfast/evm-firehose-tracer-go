@@ -29,7 +29,7 @@ func TestTracer_SystemCall(t *testing.T) {
 				50_000,             // gasUsed: ~50k gas consumed
 			).
 			// Then regular transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -68,7 +68,7 @@ func TestTracer_SystemCall(t *testing.T) {
 				[]byte{},
 				45_000,
 			).
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -106,7 +106,7 @@ func TestTracer_SystemCall(t *testing.T) {
 				45_000,
 			).
 			// Then transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -144,7 +144,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			StorageChange(BeaconRootsAddress, storageKey, zeroVal, storageValue).
 			EndCall([]byte{}, 50_000, nil).
 			EndSystemCall().
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -168,12 +168,12 @@ func TestTracer_SystemCall(t *testing.T) {
 			StartBlock().
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
 			// First transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
 			// Second transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(CharlieAddr, MinerAddr, bigInt(200), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -196,7 +196,7 @@ func TestTracer_SystemCall(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -240,7 +240,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			// First system call
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot1[:], 30_000_000, []byte{}, 50_000).
 			// Transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).

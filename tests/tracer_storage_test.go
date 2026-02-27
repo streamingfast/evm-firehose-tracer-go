@@ -17,7 +17,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		oldVal := hash32(100)
 		newVal := hash32(200)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, oldVal, newVal).
 			EndCall([]byte{}, 21000, nil).
@@ -41,7 +41,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		key2 := hash32(2)
 		key3 := hash32(3)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key1, hash32(100), hash32(200)).
 			StorageChange(BobAddr, key2, hash32(300), hash32(400)).
@@ -71,7 +71,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		key2 := hash32(2)
 		key10 := hash32(10)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			StorageChange(BobAddr, key1, hash32(100), hash32(200)).
 			StartCallRaw(1, byte(firehose.CallTypeCall), BobAddr, AliceAddr, []byte{}, 50000, bigInt(0)).
@@ -107,7 +107,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		}
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, oldVal, newVal).
 			EndCall([]byte{}, 21000, nil).
@@ -132,7 +132,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		val100 := hash32(100)
 		val200 := hash32(200)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			// Initialize: zero -> non-zero
 			StorageChange(BobAddr, key1, zero, val100).
@@ -165,7 +165,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		value := hash32(100) // Same for old and new
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, value, value). // No actual change
 			EndCall([]byte{}, 21000, nil).

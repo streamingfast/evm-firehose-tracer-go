@@ -23,15 +23,14 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
 		require.NoError(t, err)
 
-		txEvent := new(TxEventBuilder).
-			Defaults().
-			Type(TxTypeSetCode).
-			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
-			Build()
-
 		tester := NewTracerTesterPrague(t).
 			SetMockStateCode(AliceAddr, delegationCode). // Set delegation code in mock state
-			startBlockTrxWithEvent(txEvent)
+			StartBlockTrx(new(TxEventBuilder).
+				Defaults().
+				Type(TxTypeSetCode).
+				SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+				Build(),
+			)
 
 		// EIP-7702: Authorization nonce change happens before root call
 		tester.NonceChange(AliceAddr, 0, 1)
@@ -57,7 +56,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		// Alice has no code (empty account)
 		// No delegation should be detected
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -75,7 +74,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		regularCode := []byte{0x60, 0x80, 0x60, 0x40} // Some EVM bytecode
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(regularCode), []byte{}, regularCode).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000, nil).
@@ -94,7 +93,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		invalidDelegation := []byte{0xef, 0x01, 0x00, 0x11, 0x22} // Only 5 bytes
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(invalidDelegation), []byte{}, invalidDelegation).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000, nil).
@@ -117,7 +116,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		copy(invalidDelegation[3:], CharlieAddr[:])
 
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(invalidDelegation), []byte{}, invalidDelegation).
 			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000, nil).
@@ -134,7 +133,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 	t.Run("create_transaction_no_delegation_check", func(t *testing.T) {
 		// CREATE transactions should NOT check for delegation (callType != CREATE check in code)
 		NewTracerTester(t).
-			StartBlockTrxNoHooks().
+			StartBlockTrx(TestLegacyTrx).
 			StartRootCreateCall(AliceAddr, [20]byte{}, bigInt(0), 21000, []byte{0x60, 0x80}).
 			EndCall([]byte{}, 21000, nil).
 			EndBlockTrx(successReceipt(21000), nil, nil).

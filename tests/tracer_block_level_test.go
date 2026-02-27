@@ -17,7 +17,7 @@ func TestTracer_BlockLevelBalanceChanges(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			// Transaction happens
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
@@ -67,7 +67,7 @@ func TestTracer_BlockLevelBalanceChanges(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlock().
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), gasUsed, []byte{}).
 			EndCall([]byte{}, gasUsed, nil).
 			EndTrx(successReceipt(gasUsed), nil).
@@ -93,12 +93,12 @@ func TestTracer_BlockLevelBalanceChanges(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			// First transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
 			// Second transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(BobAddr, CharlieAddr, bigInt(50), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
@@ -155,7 +155,7 @@ func TestTracer_BlockLevelCodeChanges(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			// Transaction happens first
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
@@ -278,7 +278,7 @@ func TestTracer_BlockLevelWithdrawals(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			// Transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
@@ -306,7 +306,7 @@ func TestTracer_BlockLevelWithdrawals(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			// Transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
@@ -345,7 +345,7 @@ func TestTracer_ComplexBlockScenarios(t *testing.T) {
 			// System call
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
 			// Transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
@@ -389,7 +389,7 @@ func TestTracer_ComplexBlockScenarios(t *testing.T) {
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
 			SystemCall(SystemAddress, HistoryStorageAddress, parentHash[:], 30_000_000, []byte{}, 45_000).
 			// Transaction
-			StartTrxNoHooks().
+			StartTrx(TestLegacyTrx).
 			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000, nil).
 			EndTrx(successReceipt(21000), nil).
