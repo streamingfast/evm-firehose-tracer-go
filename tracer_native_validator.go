@@ -13,13 +13,13 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
+	"github.com/streamingfast/eth-go"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 )
 
 type nativeValidator struct {
-	stateDB *mockStateDB
-	tracer  *tracers.Firehose
-	t       *testing.T
+	tracer *tracers.Firehose
+	t      *testing.T
 }
 
 // newNativeValidator creates a native validator with go-ethereum tracer
@@ -39,8 +39,7 @@ func newNativeValidator(nativeJSONConfig string) (*nativeValidator, error) {
 	}
 
 	return &nativeValidator{
-		tracer:  nativeTracer,
-		stateDB: newMockStateDB(),
+		tracer: nativeTracer,
 	}, nil
 }
 
@@ -252,23 +251,18 @@ func (v *nativeValidator) OnBlockEnd(err error) {
 	v.tracer.OnBlockEnd(err)
 }
 
-func (v *nativeValidator) OnTxStart(tx interface{}, from [20]byte) [32]byte {
+func (v *nativeValidator) OnTxStart(tx TxEvent, from [20]byte, stateReader StateReader) [32]byte {
 	if v == nil {
 		return [32]byte{}
 	}
 
-	txEvent, ok := tx.(TxEvent)
-	if !ok {
-		return [32]byte{}
-	}
-
-	nativeTx := convertToNativeTransaction(txEvent)
+	nativeTx := convertToNativeTransaction(tx)
 	nativeFrom := common.Address(from)
 
 	// Pass minimal mock StateDB - the native tracer only needs it for
 	// getExecutedCode checks (GetNonce, GetCode, Exist methods)
 	vmContext := &tracing.VMContext{
-		StateDB: v.stateDB,
+		StateDB: &vmStateDB{stateReader},
 	}
 
 	v.tracer.OnTxStart(vmContext, nativeTx, nativeFrom)
@@ -277,17 +271,12 @@ func (v *nativeValidator) OnTxStart(tx interface{}, from [20]byte) [32]byte {
 	return [32]byte(nativeTx.Hash())
 }
 
-func (v *nativeValidator) OnTxEnd(receipt interface{}, err error) {
+func (v *nativeValidator) OnTxEnd(receipt *ReceiptData, err error) {
 	if v == nil {
 		return
 	}
 
-	receiptData, ok := receipt.(*ReceiptData)
-	if !ok {
-		return
-	}
-
-	nativeReceipt := convertToNativeReceipt(receiptData)
+	nativeReceipt := convertToNativeReceipt(receipt)
 	v.tracer.OnTxEnd(nativeReceipt, err)
 }
 
@@ -399,8 +388,7 @@ func (v *nativeValidator) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 		return
 	}
 
-	// Call native tracer's OnKeccakPreimage
-	v.tracer.OnKeccakPreimage(toCommonHash(hash), preimage)
+	v.tracer.OnKeccakPreimage(common.Hash(hash), preimage)
 }
 
 func (v *nativeValidator) OnSystemCallStart() {
@@ -730,151 +718,6 @@ func convertToNativeLog(addr [20]byte, topics [][32]byte, data []byte, blockInde
 	}
 }
 
-// mockStateDB is a minimal StateDB stub for testing
-// It only implements the methods called by the native Firehose tracer (firehose.go)
-// The tracer primarily uses GetNonce, GetCode, and Exist for getExecutedCode checks
-// All other methods are no-op stubs since actual state is tracked via tracer hooks
-type mockStateDB struct {
-	// Configurable state for testing
-	nonces map[common.Address]uint64
-	codes  map[common.Address][]byte
-	exists map[common.Address]bool
-}
-
-func newMockStateDB() *mockStateDB {
-	return &mockStateDB{
-		nonces: make(map[common.Address]uint64),
-		codes:  make(map[common.Address][]byte),
-		exists: make(map[common.Address]bool),
-	}
-}
-
-// SetNonce sets the nonce for a specific address (for testing)
-func (s *mockStateDB) SetNonce(addr common.Address, nonce uint64) {
-	s.nonces[addr] = nonce
-}
-
-// SetCode sets the code for a specific address (for testing)
-func (s *mockStateDB) SetCode(addr common.Address, code []byte) {
-	s.codes[addr] = code
-	s.exists[addr] = true // Setting code implies account exists
-}
-
-// SetExist sets whether an address exists (for testing)
-func (s *mockStateDB) SetExist(addr common.Address, exists bool) {
-	s.exists[addr] = exists
-}
-
-// Methods used by native firehose.go tracer (takes common.Address)
-func (s *mockStateDB) GetNonce(addr common.Address) uint64 {
-	if nonce, ok := s.nonces[addr]; ok {
-		return nonce
-	}
-	return 0 // Default: nonces start at 0
-}
-
-func (s *mockStateDB) GetCode(addr common.Address) []byte {
-	if code, ok := s.codes[addr]; ok {
-		return code
-	}
-	return nil // Default: no code (EOA or non-existent)
-}
-
-func (s *mockStateDB) Exist(addr common.Address) bool {
-	if exists, ok := s.exists[addr]; ok {
-		return exists
-	}
-	return true // Default: assume addresses exist unless explicitly set to false
-}
-
-// mockStateReader wraps mockStateDB to implement StateReader interface
-// This allows the same mock state to be used by both the native validator (via StateDB)
-// and the shared tracer (via StateReader)
-type mockStateReader struct {
-	*mockStateDB
-}
-
-// GetCode implements StateReader interface (takes [20]byte instead of common.Address)
-func (m *mockStateReader) GetCode(addr [20]byte) []byte {
-	return m.mockStateDB.GetCode(common.Address(addr))
-}
-
-// GetNonce implements StateReader interface (takes [20]byte instead of common.Address)
-func (m *mockStateReader) GetNonce(addr [20]byte) uint64 {
-	return m.mockStateDB.GetNonce(common.Address(addr))
-}
-
-// Exist implements StateReader interface (takes [20]byte instead of common.Address)
-func (m *mockStateReader) Exist(addr [20]byte) bool {
-	return m.mockStateDB.Exist(common.Address(addr))
-}
-
-// No-op stub implementations for StateDB interface methods
-// These are required by the interface but not used by the native firehose.go tracer
-func (s *mockStateDB) CreateAccount(addr common.Address) {}
-func (s *mockStateDB) SubBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {
-}
-func (s *mockStateDB) AddBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {
-}
-func (s *mockStateDB) GetBalance(addr common.Address) *uint256.Int { return uint256.NewInt(0) }
-func (s *mockStateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
-	return common.Hash{}
-}
-func (s *mockStateDB) GetTransientState(addr common.Address, hash common.Hash) common.Hash {
-	return common.Hash{}
-}
-func (s *mockStateDB) SetState(addr common.Address, key, value common.Hash) {}
-func (s *mockStateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
-	return common.Hash{}
-}
-func (s *mockStateDB) GetStorageRoot(addr common.Address) common.Hash            { return common.Hash{} }
-func (s *mockStateDB) GetCodeSize(addr common.Address) int                       { return 0 }
-func (s *mockStateDB) GetCodeHash(addr common.Address) common.Hash               { return common.Hash{} }
-func (s *mockStateDB) AddRefund(uint64)                                          {}
-func (s *mockStateDB) SubRefund(uint64)                                          {}
-func (s *mockStateDB) GetRefund() uint64                                         { return 0 }
-func (s *mockStateDB) HasSelfDestructed(addr common.Address) bool                { return false }
-func (s *mockStateDB) SelfDestruct(addr common.Address)                          {}
-func (s *mockStateDB) Selfdestruct6780(addr common.Address)                      {}
-func (s *mockStateDB) AddLog(*types.Log)                                         {}
-func (s *mockStateDB) AddPreimage(common.Hash, []byte)                           {}
-func (s *mockStateDB) AddAddressToAccessList(addr common.Address)                {}
-func (s *mockStateDB) AddSlotToAccessList(addr common.Address, slot common.Hash) {}
-func (s *mockStateDB) AddressInAccessList(addr common.Address) bool              { return false }
-func (s *mockStateDB) SlotInAccessList(addr common.Address, slot common.Hash) (bool, bool) {
-	return false, false
-}
-func (s *mockStateDB) Prepare(rules params.Rules, sender, coinbase common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList) {
-}
-func (s *mockStateDB) Snapshot() int        { return 0 }
-func (s *mockStateDB) RevertToSnapshot(int) {}
-
-// toCommonHash converts a [32]byte to common.Hash
-func toCommonHash(hash [32]byte) common.Hash {
-	return common.Hash(hash)
-}
-
-// SetTestingMockStateCode sets the code for an address in the mock StateDB
-func SetTestingMockStateCode(nv interface{}, addr common.Address, code []byte) {
-	if v, ok := nv.(*nativeValidator); ok {
-		v.stateDB.SetCode(addr, code)
-	}
-}
-
-// SetTestingMockStateNonce sets the nonce for an address in the mock StateDB
-func SetTestingMockStateNonce(nv interface{}, addr common.Address, nonce uint64) {
-	if v, ok := nv.(*nativeValidator); ok {
-		v.stateDB.SetNonce(addr, nonce)
-	}
-}
-
-// SetTestingMockStateExist sets whether an address exists in the mock StateDB
-func SetTestingMockStateExist(nv interface{}, addr common.Address, exists bool) {
-	if v, ok := nv.(*nativeValidator); ok {
-		v.stateDB.SetExist(addr, exists)
-	}
-}
-
 // GetTestingNativeValidatorBuffer returns the native validator's internal testing buffer
 func GetTestingNativeValidatorBuffer(nv interface{}) *bytes.Buffer {
 	if v, ok := nv.(*nativeValidator); ok {
@@ -890,9 +733,9 @@ func (t *Tracer) SetTestingNativeValidator(nv interface{}) {
 	}
 }
 
-// GetTestingNativeValidator returns the native validator for testing purposes
-func (t *Tracer) GetTestingNativeValidator() interface{} {
-	return t.nativeValidator
+// GetNativeTracerBuffer returns the native tracer's internal buffer for testing purposes
+func (t *Tracer) GetNativeTracerBuffer() *bytes.Buffer {
+	return t.nativeValidator.tracer.InternalTestingBuffer()
 }
 
 // NewTestingNativeValidator creates a new native validator for testing
@@ -900,10 +743,51 @@ func NewTestingNativeValidator(config string) (interface{}, error) {
 	return newNativeValidator(config)
 }
 
-// GetTestingStateDB returns the mockStateDB from a native validator for testing
-func GetTestingStateDB(nv interface{}) interface{} {
-	if v, ok := nv.(*nativeValidator); ok {
-		return v.stateDB
-	}
-	return nil
+var _ tracing.StateDB = (*vmStateDB)(nil)
+
+type vmStateDB struct {
+	StateReader
+}
+
+// Exist implements [tracing.StateDB].
+// Subtle: this method shadows the method (StateReader).Exist of vmStateDB.StateReader.
+func (v *vmStateDB) Exist(addr common.Address) bool {
+	return v.StateReader.Exist(addr)
+}
+
+// GetBalance implements [tracing.StateDB].
+func (v *vmStateDB) GetBalance(common.Address) *uint256.Int {
+	panic("unimplemented")
+}
+
+// GetCode implements [tracing.StateDB].
+// Subtle: this method shadows the method (StateReader).GetCode of vmStateDB.StateReader.
+func (v *vmStateDB) GetCode(addr common.Address) []byte {
+	return v.StateReader.GetCode(addr)
+}
+
+// GetCodeHash implements [tracing.StateDB].
+func (v *vmStateDB) GetCodeHash(addr common.Address) common.Hash {
+	return common.BytesToHash(eth.Keccak256(v.StateReader.GetCode(addr)))
+}
+
+// GetNonce implements [tracing.StateDB].
+// Subtle: this method shadows the method (StateReader).GetNonce of vmStateDB.StateReader.
+func (v *vmStateDB) GetNonce(addr common.Address) uint64 {
+	return v.StateReader.GetNonce(addr)
+}
+
+// GetRefund implements [tracing.StateDB].
+func (v *vmStateDB) GetRefund() uint64 {
+	panic("unimplemented")
+}
+
+// GetState implements [tracing.StateDB].
+func (v *vmStateDB) GetState(common.Address, common.Hash) common.Hash {
+	panic("unimplemented")
+}
+
+// GetTransientState implements [tracing.StateDB].
+func (v *vmStateDB) GetTransientState(common.Address, common.Hash) common.Hash {
+	panic("unimplemented")
 }

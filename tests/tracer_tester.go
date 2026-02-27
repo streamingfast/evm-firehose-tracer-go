@@ -147,9 +147,9 @@ type TracerTester struct {
 	Block  *BlockEventBuilder
 	Tracer *firehose.Tracer
 
-	// Mock state reader for providing blockchain state to the tracer
+	// mockStateDB for providing blockchain state to the tracer
 	// Wraps the native validator's mockStateDB
-	stateReader firehose.StateReader
+	mockStateDB *mockStateDB
 
 	// Current call depth (0 = root call, 1 = first nested call, etc.)
 	// Automatically managed by StartCall*/EndCall methods
@@ -168,6 +168,7 @@ func NewTracerTester(t *testing.T) *TracerTester {
 // firehose.NewTracerTesterPrague creates a tracer tester with Prague fork enabled (for EIP-7702 testing)
 func NewTracerTesterPrague(t *testing.T) *TracerTester {
 	pragueTime := uint64(0) // Prague activated at genesis
+
 	return newTracerTesterWithConfig(t, &firehose.ChainConfig{
 		ChainID:             big.NewInt(1),
 		PragueTime:          &pragueTime,
@@ -183,16 +184,13 @@ func newTracerTesterWithConfig(t *testing.T, chainConfig *firehose.ChainConfig) 
 			ChainConfig:  chainConfig,
 			OutputWriter: &bytes.Buffer{},
 		}),
+		mockStateDB: newMockStateDB(),
 	}
 
 	var err error
 	nv, err := firehose.NewTestingNativeValidator("")
 	require.NoError(t, err, "creating native validator")
 	tester.Tracer.SetTestingNativeValidator(nv)
-
-	// Create state reader wrapper around the native validator's mockStateDB
-	stateDB := firehose.GetTestingStateDB(nv)
-	tester.stateReader = firehose.NewTestingMockStateReader(stateDB)
 
 	tester.Tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
 
@@ -207,30 +205,21 @@ func toCommonAddress(addr [20]byte) common.Address {
 // SetMockStateCode sets the code for an address in the mock StateDB
 // This allows testing code paths that depend on StateDB.GetCode()
 func (s *TracerTester) SetMockStateCode(addr [20]byte, code []byte) *TracerTester {
-	nv := s.Tracer.GetTestingNativeValidator()
-	if nv != nil {
-		firehose.SetTestingMockStateCode(nv, toCommonAddress(addr), code)
-	}
+	s.mockStateDB.SetCode(addr, code)
 	return s
 }
 
 // SetMockStateNonce sets the nonce for an address in the mock StateDB
 // This allows testing code paths that depend on StateDB.GetNonce()
 func (s *TracerTester) SetMockStateNonce(addr [20]byte, nonce uint64) *TracerTester {
-	nv := s.Tracer.GetTestingNativeValidator()
-	if nv != nil {
-		firehose.SetTestingMockStateNonce(nv, toCommonAddress(addr), nonce)
-	}
+	s.mockStateDB.SetNonce(addr, nonce)
 	return s
 }
 
 // SetMockStateExist sets whether an address exists in the mock StateDB
 // This allows testing code paths that depend on StateDB.Exist()
 func (s *TracerTester) SetMockStateExist(addr [20]byte, exists bool) *TracerTester {
-	nv := s.Tracer.GetTestingNativeValidator()
-	if nv != nil {
-		firehose.SetTestingMockStateExist(nv, toCommonAddress(addr), exists)
-	}
+	s.mockStateDB.SetExist(addr, exists)
 	return s
 }
 
@@ -242,13 +231,13 @@ func (s *TracerTester) StartBlock() *TracerTester {
 // StartBlockTrx starts a block and a transaction
 func (s *TracerTester) StartBlockTrx(tx firehose.TxEvent) *TracerTester {
 	s.Tracer.OnBlockStart(TestBlock)
-	s.Tracer.OnTxStart(tx, s.stateReader)
+	s.Tracer.OnTxStart(tx, s.mockStateDB)
 	return s
 }
 
 // StartTrx starts a transaction without starting a block. Use this for testing transaction tracing in isolation.
 func (s *TracerTester) StartTrx(tx firehose.TxEvent) *TracerTester {
-	s.Tracer.OnTxStart(tx, s.stateReader)
+	s.Tracer.OnTxStart(tx, s.mockStateDB)
 	return s
 }
 
@@ -381,20 +370,15 @@ func (s *TracerTester) Log(addr [20]byte, topics [][32]byte, data []byte, blockI
 //
 // Note: Since OnOpcode isn't exposed in tests, we manually mark the call as suicided
 func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractBalance *big.Int) *TracerTester {
-	// Step 1: Simulate OnOpcode(SELFDESTRUCT) - marks active call as suicided
+	// Step 1: Call OnOpcode(SELFDESTRUCT) - marks active call as suicided and executed
 	// (matching native tracer firehose.go:1191-1193)
 	activeCallDepth := s.depth - 1 // Depth of the active call (depth-1 since we incremented after StartCall)
 
-	// Mark the shared tracer's active call as suicided and executed
-	// OnOpcode in the native tracer sets both Suicide and ExecutedCode
-	activeCall := s.Tracer.GetTestingCallStackPeek()
-	if activeCall != nil {
-		firehose.SetTestingCallSuicide(activeCall, true)
-		firehose.SetTestingCallExecutedCode(activeCall, true) // Set by captureInterpreterStep in native tracer
-	}
-
 	// Call shared tracer's OnOpcode to mark the call as suicided and executed
-	// This will also call the native validator internally if present
+	// This will:
+	// - Set call.Suicide = true (for SELFDESTRUCT opcode)
+	// - Set call.ExecutedCode = true (always set by OnOpcode)
+	// - Call the native validator internally if present
 	emptyScope := firehose.OpcodeScopeData{}
 	s.Tracer.OnOpcode(0, 0xff, 0, 0, emptyScope, nil, activeCallDepth, nil) // op=0xff is SELFDESTRUCT
 
@@ -570,12 +554,8 @@ func (s *TracerTester) GenesisBlock(blockNumber uint64, blockHash [32]byte, allo
 }
 
 func (s *TracerTester) Validate(validateFunc func(block *pbeth.Block)) {
-	block := ParseFirehoseBlock(s.t, "shared tracer", s.Tracer.GetTestingOutputWriter())
-
-	nv := s.Tracer.GetTestingNativeValidator()
-	require.NotNil(s.t, nv, "native validator should be configured for testing")
-
-	nativeBlock := ParseFirehoseBlock(s.t, "native tracer", firehose.GetTestingNativeValidatorBuffer(nv))
+	block := ParseFirehoseBlock(s.t, "shared tracer", s.Tracer.GetTestingOutputBuffer())
+	nativeBlock := ParseFirehoseBlock(s.t, "native tracer", s.Tracer.GetNativeTracerBuffer())
 
 	if !proto.Equal(block, nativeBlock) {
 		require.EqualExportedValues(s.t, nativeBlock, block)
@@ -644,4 +624,61 @@ func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.B
 	require.NoError(t, scanner.Err(), "For %s: reading buffer", tag)
 	require.Fail(t, "For %s: no FIRE BLOCK found in buffer", tag)
 	return nil
+}
+
+// mockStateDB is a minimal StateDB stub for testing
+// It only implements the methods called by the native Firehose tracer (firehose.go)
+// The tracer primarily uses GetNonce, GetCode, and Exist for getExecutedCode checks
+// All other methods are no-op stubs since actual state is tracked via tracer hooks
+type mockStateDB struct {
+	// Configurable state for testing
+	nonces map[[20]byte]uint64
+	codes  map[[20]byte][]byte
+	exists map[[20]byte]bool
+}
+
+func newMockStateDB() *mockStateDB {
+	return &mockStateDB{
+		nonces: make(map[[20]byte]uint64),
+		codes:  make(map[[20]byte][]byte),
+		exists: make(map[[20]byte]bool),
+	}
+}
+
+// SetNonce sets the nonce for a specific address (for testing)
+func (s *mockStateDB) SetNonce(addr [20]byte, nonce uint64) {
+	s.nonces[addr] = nonce
+}
+
+// SetCode sets the code for a specific address (for testing)
+func (s *mockStateDB) SetCode(addr [20]byte, code []byte) {
+	s.codes[addr] = code
+	s.exists[addr] = true // Setting code implies account exists
+}
+
+// SetExist sets whether an address exists (for testing)
+func (s *mockStateDB) SetExist(addr [20]byte, exists bool) {
+	s.exists[addr] = exists
+}
+
+// Methods used by native firehose.go tracer (takes [20]byte)
+func (s *mockStateDB) GetNonce(addr [20]byte) uint64 {
+	if nonce, ok := s.nonces[addr]; ok {
+		return nonce
+	}
+	return 0 // Default: nonces start at 0
+}
+
+func (s *mockStateDB) GetCode(addr [20]byte) []byte {
+	if code, ok := s.codes[addr]; ok {
+		return code
+	}
+	return nil // Default: no code (EOA or non-existent)
+}
+
+func (s *mockStateDB) Exist(addr [20]byte) bool {
+	if exists, ok := s.exists[addr]; ok {
+		return exists
+	}
+	return true // Default: assume addresses exist unless explicitly set to false
 }

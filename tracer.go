@@ -234,6 +234,7 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 	}
 
 	firehoseInfo("genesis block (number=%d hash=%x)", event.Block.Number, event.Block.Hash)
+	t.ensureBlockChainInit()
 
 	// Going to be reset in OnBlockEnd
 	t.blockIsGenesis = true
@@ -337,6 +338,8 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 	if t.nativeValidator != nil {
 		t.nativeValidator.OnBlockStart(event)
 	}
+
+	t.ensureBlockChainInit()
 
 	block := event.Block
 
@@ -515,7 +518,7 @@ func (t *Tracer) OnTxStart(event TxEvent, stateReader StateReader) {
 	if t.nativeValidator != nil {
 		// Get the transaction hash computed by the native go-ethereum tracer
 		// This ensures we use the correct hash for all transaction types
-		nativeHash := t.nativeValidator.OnTxStart(event, event.From)
+		nativeHash := t.nativeValidator.OnTxStart(event, event.From, stateReader)
 		event.Hash = nativeHash
 	}
 
@@ -1351,6 +1354,11 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScop
 	// This matches native tracer behavior in captureInterpreterStep (firehose.go:1296)
 	// Note: Native tracer ALWAYS sets this, no trace level check
 	call.ExecutedCode = true
+
+	// Mark SELFDESTRUCT opcode (matching native tracer firehose.go:1193)
+	if op == 0xff { // SELFDESTRUCT opcode
+		call.Suicide = true
+	}
 
 	// Detailed opcode-level tracing could be added here
 	// For now, we skip it as it's very verbose

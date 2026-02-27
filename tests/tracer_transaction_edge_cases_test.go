@@ -202,17 +202,14 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 		}
 
 		tester := NewTracerTester(t)
-		tester.StartBlockTrx(TestLegacyTrx)
-
-		// Set transaction type to blob (type 3)
-		tester.Tracer.GetTestingTransaction().Type = pbeth.TransactionTrace_TRX_TYPE_BLOB
+		tester.StartBlockTrx(TestBlobTrx)
 
 		tester.StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{}, 95000).
 			EndBlockTrx(receipt, nil, nil)
 
 		// Parse the block output (skip native validator comparison since we manually set the type)
-		block := ParseFirehoseBlock(t, "shared tracer", tester.Tracer.GetTestingOutputWriter())
+		block := ParseFirehoseBlock(t, "shared tracer", tester.Tracer.GetTestingOutputBuffer())
 		trx := block.TransactionTraces[0]
 
 		// Verify transaction type

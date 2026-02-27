@@ -1,6 +1,7 @@
 package firehose
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -8,6 +9,15 @@ import (
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"google.golang.org/protobuf/proto"
 )
+
+// GetTestingOutputBuffer returns the output buffer from the tracer's config if it is a bytes.Buffer, otherwise returns nil
+func (t *Tracer) GetTestingOutputBuffer() *bytes.Buffer {
+	if buf, ok := t.config.OutputWriter.(*bytes.Buffer); ok {
+		return buf
+	}
+
+	return nil
+}
 
 // printToFirehose writes a message to the Firehose output stream
 func (t *Tracer) printToFirehose(args ...interface{}) {
