@@ -733,7 +733,7 @@ func convertToNativeLog(addr [20]byte, topics [][32]byte, data []byte, blockInde
 // It only implements the methods called by the native Firehose tracer (firehose.go)
 // The tracer primarily uses GetNonce, GetCode, and Exist for getExecutedCode checks
 // All other methods are no-op stubs since actual state is tracked via tracer hooks
-type mockStateDB struct{
+type mockStateDB struct {
 	// Configurable state for testing
 	nonces map[common.Address]uint64
 	codes  map[common.Address][]byte
@@ -810,29 +810,45 @@ func (m *mockStateReader) Exist(addr [20]byte) bool {
 
 // No-op stub implementations for StateDB interface methods
 // These are required by the interface but not used by the native firehose.go tracer
-func (s *mockStateDB) CreateAccount(addr common.Address)                                          {}
-func (s *mockStateDB) SubBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {}
-func (s *mockStateDB) AddBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {}
-func (s *mockStateDB) GetBalance(addr common.Address) *uint256.Int                               { return uint256.NewInt(0) }
-func (s *mockStateDB) GetState(addr common.Address, hash common.Hash) common.Hash                { return common.Hash{} }
-func (s *mockStateDB) GetTransientState(addr common.Address, hash common.Hash) common.Hash       { return common.Hash{} }
-func (s *mockStateDB) SetState(addr common.Address, key, value common.Hash)                      {}
-func (s *mockStateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash       { return common.Hash{} }
-func (s *mockStateDB) GetStorageRoot(addr common.Address) common.Hash                            { return common.Hash{} }
-func (s *mockStateDB) GetCodeSize(addr common.Address) int                                       { return 0 }
-func (s *mockStateDB) GetCodeHash(addr common.Address) common.Hash                               { return common.Hash{} }
-func (s *mockStateDB) AddRefund(uint64)                                                          {}
-func (s *mockStateDB) SubRefund(uint64)                                                          {}
-func (s *mockStateDB) GetRefund() uint64                                                         { return 0 }
-func (s *mockStateDB) HasSelfDestructed(addr common.Address) bool                                { return false }
-func (s *mockStateDB) SelfDestruct(addr common.Address)                                          {}
-func (s *mockStateDB) Selfdestruct6780(addr common.Address)                                      {}
-func (s *mockStateDB) AddLog(*types.Log)                                                         {}
-func (s *mockStateDB) AddPreimage(common.Hash, []byte)                                           {}
-func (s *mockStateDB) AddAddressToAccessList(addr common.Address)                                {}
-func (s *mockStateDB) AddSlotToAccessList(addr common.Address, slot common.Hash)                 {}
-func (s *mockStateDB) AddressInAccessList(addr common.Address) bool                              { return false }
-func (s *mockStateDB) SlotInAccessList(addr common.Address, slot common.Hash) (bool, bool)       { return false, false }
-func (s *mockStateDB) Prepare(rules params.Rules, sender, coinbase common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList) {}
-func (s *mockStateDB) Snapshot() int                                                             { return 0 }
-func (s *mockStateDB) RevertToSnapshot(int)                                                      {}
+func (s *mockStateDB) CreateAccount(addr common.Address) {}
+func (s *mockStateDB) SubBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {
+}
+func (s *mockStateDB) AddBalance(addr common.Address, amount *big.Int, reason tracing.BalanceChangeReason) {
+}
+func (s *mockStateDB) GetBalance(addr common.Address) *uint256.Int { return uint256.NewInt(0) }
+func (s *mockStateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
+	return common.Hash{}
+}
+func (s *mockStateDB) GetTransientState(addr common.Address, hash common.Hash) common.Hash {
+	return common.Hash{}
+}
+func (s *mockStateDB) SetState(addr common.Address, key, value common.Hash) {}
+func (s *mockStateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
+	return common.Hash{}
+}
+func (s *mockStateDB) GetStorageRoot(addr common.Address) common.Hash            { return common.Hash{} }
+func (s *mockStateDB) GetCodeSize(addr common.Address) int                       { return 0 }
+func (s *mockStateDB) GetCodeHash(addr common.Address) common.Hash               { return common.Hash{} }
+func (s *mockStateDB) AddRefund(uint64)                                          {}
+func (s *mockStateDB) SubRefund(uint64)                                          {}
+func (s *mockStateDB) GetRefund() uint64                                         { return 0 }
+func (s *mockStateDB) HasSelfDestructed(addr common.Address) bool                { return false }
+func (s *mockStateDB) SelfDestruct(addr common.Address)                          {}
+func (s *mockStateDB) Selfdestruct6780(addr common.Address)                      {}
+func (s *mockStateDB) AddLog(*types.Log)                                         {}
+func (s *mockStateDB) AddPreimage(common.Hash, []byte)                           {}
+func (s *mockStateDB) AddAddressToAccessList(addr common.Address)                {}
+func (s *mockStateDB) AddSlotToAccessList(addr common.Address, slot common.Hash) {}
+func (s *mockStateDB) AddressInAccessList(addr common.Address) bool              { return false }
+func (s *mockStateDB) SlotInAccessList(addr common.Address, slot common.Hash) (bool, bool) {
+	return false, false
+}
+func (s *mockStateDB) Prepare(rules params.Rules, sender, coinbase common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList) {
+}
+func (s *mockStateDB) Snapshot() int        { return 0 }
+func (s *mockStateDB) RevertToSnapshot(int) {}
+
+// toCommonHash converts a [32]byte to common.Hash
+func toCommonHash(hash [32]byte) common.Hash {
+	return common.Hash(hash)
+}

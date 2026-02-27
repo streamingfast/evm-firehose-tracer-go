@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	eth "github.com/streamingfast/eth-go"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -65,12 +66,12 @@ type Tracer struct {
 	blockIsGenesis              bool
 
 	// Transaction state
-	transaction          *pbeth.TransactionTrace
-	transactionLogIndex  uint32
-	transactionStateReader StateReader           // State reader for current transaction (from TxEvent)
-	inSystemCall         bool
-	transactionIsolated  bool                    // true = isolated mode, false = coordinator mode
-	transactionTransient *pbeth.TransactionTrace // Only used in isolated mode
+	transaction            *pbeth.TransactionTrace
+	transactionLogIndex    uint32
+	transactionStateReader StateReader // State reader for current transaction (from TxEvent)
+	inSystemCall           bool
+	transactionIsolated    bool                    // true = isolated mode, false = coordinator mode
+	transactionTransient   *pbeth.TransactionTrace // Only used in isolated mode
 
 	// Call state
 	callStack               *CallStack
@@ -297,6 +298,14 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 
 	// End the block
 	t.OnBlockEnd(nil)
+}
+
+// hashBytes computes the Keccak256 hash of the given data
+func hashBytes(data []byte) [32]byte {
+	hash := eth.Keccak256(data)
+	var result [32]byte
+	copy(result[:], hash)
+	return result
 }
 
 // sortedGenesisAddresses returns genesis allocation addresses in deterministic sorted order
@@ -1649,11 +1658,11 @@ func (t *Tracer) panicInvalidState(msg string, callerSkip int) {
 // EIP-7702: Delegation format is 0xef0100 + 20-byte address (23 bytes total)
 func parseDelegation(code []byte) ([20]byte, bool) {
 	var delegationPrefix = []byte{0xef, 0x01, 0x00}
-	
+
 	if len(code) != 23 || !bytes.HasPrefix(code, delegationPrefix) {
 		return [20]byte{}, false
 	}
-	
+
 	var addr [20]byte
 	copy(addr[:], code[len(delegationPrefix):])
 	return addr, true
