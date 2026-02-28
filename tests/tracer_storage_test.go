@@ -3,8 +3,6 @@ package tests
 import (
 	"testing"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go"
-
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
 )
@@ -18,7 +16,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		newVal := hash32(200)
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, oldVal, newVal).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -42,7 +40,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		key3 := hash32(3)
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key1, hash32(100), hash32(200)).
 			StorageChange(BobAddr, key2, hash32(300), hash32(400)).
 			StorageChange(BobAddr, key3, hash32(500), hash32(600)).
@@ -72,9 +70,9 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		key10 := hash32(10)
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 100000, []byte{}).
 			StorageChange(BobAddr, key1, hash32(100), hash32(200)).
-			StartCallRaw(byte(firehose.CallTypeCall), BobAddr, AliceAddr, []byte{}, 50000, bigInt(0)).
+			StartCall(BobAddr, AliceAddr, bigInt(0), 50000, []byte{}).
 			StorageChange(AliceAddr, key10, hash32(1000), hash32(2000)).
 			EndCall([]byte{}, 50000).
 			StorageChange(BobAddr, key2, hash32(300), hash32(400)).
@@ -108,7 +106,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, oldVal, newVal).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -133,7 +131,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 		val200 := hash32(200)
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			// Initialize: zero -> non-zero
 			StorageChange(BobAddr, key1, zero, val100).
 			// Delete: non-zero -> zero
@@ -166,7 +164,7 @@ func TestTracer_OnStorageChange(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			StorageChange(BobAddr, key, value, value). // No actual change
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).

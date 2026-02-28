@@ -17,7 +17,7 @@ func TestTracer_OnBalanceChange(t *testing.T) {
 		// Balance change during active call execution
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(900), pbeth.BalanceChange_REASON_TRANSFER).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -40,7 +40,7 @@ func TestTracer_OnBalanceChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			// Balance change BEFORE call starts
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -59,7 +59,7 @@ func TestTracer_OnBalanceChange(t *testing.T) {
 		// Multiple balance changes in same call
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(900), pbeth.BalanceChange_REASON_TRANSFER).
 			BalanceChange(BobAddr, bigInt(500), bigInt(600), pbeth.BalanceChange_REASON_TRANSFER).
 			BalanceChange(AliceAddr, bigInt(900), bigInt(800), pbeth.BalanceChange_REASON_GAS_REFUND).
@@ -128,7 +128,7 @@ func TestTracer_BalanceChangeReasons(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			NewTracerTester(t).
 				StartBlockTrx(TestLegacyTrx).
-				StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+				StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 				BalanceChange(AliceAddr, bigInt(1000), bigInt(900), tc.reason).
 				EndCall([]byte{}, 21000).
 				EndBlockTrx(successReceipt(21000), nil, nil).

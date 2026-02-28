@@ -18,7 +18,7 @@ func TestTracer_Suicide(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob (contract) self-destructs, sending balance to Charlie
 			Suicide(BobAddr, CharlieAddr, contractBalance).
 			EndCall([]byte{}, 50000).
@@ -57,7 +57,7 @@ func TestTracer_Suicide(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob self-destructs to itself
 			Suicide(BobAddr, BobAddr, contractBalance).
 			EndCall([]byte{}, 50000).
@@ -90,7 +90,7 @@ func TestTracer_Suicide(t *testing.T) {
 		// Contract with zero balance suicides
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			// Bob has zero balance
 			Suicide(BobAddr, CharlieAddr, bigInt(0)).
 			EndCall([]byte{}, 50000).
@@ -125,7 +125,7 @@ func TestTracer_Suicide(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			// Bob calls Charlie
 			StartCall(BobAddr, CharlieAddr, bigInt(0), 100000, []byte{}).
 			// Charlie self-destructs
@@ -167,7 +167,7 @@ func TestTracer_Suicide(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 300000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 300000, []byte{}).
 			// First suicide: Bob → Charlie
 			Suicide(BobAddr, CharlieAddr, balance1).
 			// Bob calls Miner
@@ -205,7 +205,7 @@ func TestTracer_Suicide(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			// Storage change before suicide
 			StorageChange(BobAddr, storageKey, zeroVal, storageValue).
 			// Log event
@@ -244,7 +244,7 @@ func TestTracer_Suicide(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Suicide(BobAddr, CharlieAddr, contractBalance).
 			EndCall([]byte{}, 50000).
 			EndBlockTrx(successReceipt(100000), nil, nil).

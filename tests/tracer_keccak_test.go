@@ -21,7 +21,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).
 			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -52,7 +52,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash1, preimage1).
 			Keccak(hash2, preimage2).
 			Keccak(hash3, preimage3).
@@ -82,7 +82,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hashParent, preimageParent).
 			StartCall(BobAddr, CharlieAddr, bigInt(0), 50000, []byte{0x02}).
 			Keccak(hashChild, preimageChild).
@@ -114,7 +114,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).
 			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -142,7 +142,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).
 			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -175,7 +175,7 @@ func TestTracer_KeccakPreimages(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			Keccak(hash, preimage).                                                    // Contract computes storage slot
 			StorageChange(BobAddr, hash, firehose.EmptyHash, hashBytes([]byte{0x01})). // Then writes to that slot
 			EndCall([]byte{}, 95000).

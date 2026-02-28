@@ -23,23 +23,18 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
 		require.NoError(t, err)
 
-		tester := NewTracerTesterPrague(t).
+		NewTracerTesterPrague(t).
 			SetMockStateCode(AliceAddr, delegationCode). // Set delegation code in mock state
-			StartBlockTrx(new(TxEventBuilder).
-				Defaults().
-				Type(TxTypeSetCode).
-				SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
-				Build(),
-			)
-
-		// EIP-7702: Authorization nonce change happens before root call
-		tester.NonceChange(AliceAddr, 0, 1)
-
-		// Code change: Alice gets delegation code
-		tester.CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(delegationCode), []byte{}, delegationCode)
-
-		tester.
-			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
+			StartBlockTrx(
+				firehose.NewTxEventBuilderFrom(TestSetCodeTrx).
+					SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+					Build(),
+			).
+			// EIP-7702: Authorization nonce change happens before root call
+			NonceChange(AliceAddr, 0, 1).
+			// Code change: Alice gets delegation code
+			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(delegationCode), []byte{}, delegationCode).
+			StartCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -57,7 +52,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		// No delegation should be detected
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
+			StartCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -76,7 +71,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(regularCode), []byte{}, regularCode).
-			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
+			StartCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -95,7 +90,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(invalidDelegation), []byte{}, invalidDelegation).
-			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
+			StartCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -118,7 +113,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			CodeChange(AliceAddr, hashBytes([]byte{}), hashBytes(invalidDelegation), []byte{}, invalidDelegation).
-			StartRootCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
+			StartCall(BobAddr, AliceAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -134,7 +129,7 @@ func TestTracer_EIP7702_DelegationDetection(t *testing.T) {
 		// CREATE transactions should NOT check for delegation (callType != CREATE check in code)
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCreateCall(AliceAddr, [20]byte{}, bigInt(0), 21000, []byte{0x60, 0x80}).
+			StartCreateCall(AliceAddr, [20]byte{}, bigInt(0), 21000, []byte{0x60, 0x80}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {

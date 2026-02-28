@@ -13,7 +13,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 		// Nonce change during active call execution
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 5, 6).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -35,7 +35,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 			StartBlockTrx(TestLegacyTrx).
 			// Nonce change BEFORE call starts
 			NonceChange(AliceAddr, 5, 6).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -55,7 +55,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 		// Multiple nonce changes in same call (unusual but possible)
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 5, 6).
 			NonceChange(BobAddr, 10, 11).
 			NonceChange(AliceAddr, 6, 7).
@@ -90,7 +90,7 @@ func TestTracer_OnNonceChange(t *testing.T) {
 		// Test the common case of first nonce increment (0 -> 1)
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			NonceChange(AliceAddr, 0, 1).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).

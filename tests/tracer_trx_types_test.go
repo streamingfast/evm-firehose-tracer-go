@@ -15,7 +15,7 @@ func TestTracer_TxTypes(t *testing.T) {
 	t.Run("legacy", func(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -37,7 +37,7 @@ func TestTracer_TxTypes(t *testing.T) {
 	t.Run("access_list", func(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestAccessListTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -63,7 +63,7 @@ func TestTracer_TxTypes(t *testing.T) {
 	t.Run("dynamic_fee", func(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestDynamicFeeTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -93,7 +93,7 @@ func TestTracer_TxTypes(t *testing.T) {
 	t.Run("blob", func(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestBlobTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -121,20 +121,16 @@ func TestTracer_TxTypes(t *testing.T) {
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
 		require.NoError(t, err)
 
-		tester := NewTracerTester(t).StartBlockTrx(
-			new(TxEventBuilder).
-				Defaults().
-				Type(TxTypeSetCode).
-				SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
-				Build(),
-		)
-
-		// EIP-7702: Authorization application happens BEFORE the root call
-		// The authorizer's nonce is incremented when the authorization is applied
-		tester.NonceChange(AliceAddr, 0, 1)
-
-		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+		NewTracerTester(t).
+			StartBlockTrx(
+				firehose.NewTxEventBuilderFrom(TestSetCodeTrx).
+					SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+					Build(),
+			).
+			// EIP-7702: Authorization application happens BEFORE the root call
+			// The authorizer's nonce is incremented when the authorization is applied
+			NonceChange(AliceAddr, 0, 1).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {

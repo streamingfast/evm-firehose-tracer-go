@@ -14,7 +14,7 @@ func TestTracer_ExecutedCode(t *testing.T) {
 		// ExecutedCode = true for CALL when opcode executes
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{0x01, 0x02}).
 			OpCode(0, 0x60, 21000, 3). // Execute a PUSH opcode
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -31,7 +31,7 @@ func TestTracer_ExecutedCode(t *testing.T) {
 		// ExecutedCode = true for STATICCALL
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, CharlieAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, CharlieAddr, bigInt(0), 100000, []byte{0x01}).
 			OpCode(0, 0x60, 100000, 3).
 			StartStaticCall(CharlieAddr, BobAddr, 50000, []byte{0x02}).
 			OpCode(0, 0x60, 50000, 3).
@@ -51,7 +51,7 @@ func TestTracer_ExecutedCode(t *testing.T) {
 		// ExecutedCode = true for DELEGATECALL
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, CharlieAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, CharlieAddr, bigInt(0), 100000, []byte{0x01}).
 			OpCode(0, 0x60, 100000, 3).
 			StartDelegateCall(CharlieAddr, BobAddr, bigInt(0), 50000, []byte{0x02}).
 			OpCode(0, 0x60, 50000, 3).
@@ -73,7 +73,7 @@ func TestTracer_ExecutedCode(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCreateCall(AliceAddr, BobAddr, bigInt(0), 53000, contractCode).
+			StartCreateCall(AliceAddr, BobAddr, bigInt(0), 53000, contractCode).
 			OpCode(0, 0x60, 53000, 3).
 			EndCall(contractCode, 50000).
 			EndBlockTrx(successReceipt(53000), nil, nil).

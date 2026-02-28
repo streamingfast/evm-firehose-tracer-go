@@ -17,21 +17,21 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
 		require.NoError(t, err, "Failed to sign authorization")
 
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		// EIP-7702: Authorization application happens BEFORE the root call
 		// The authorizer's nonce is incremented when the authorization is applied
 		tester.NonceChange(AliceAddr, 0, 1)
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -68,17 +68,17 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 		// Corrupt the signature by changing V
 		auth.V = auth.V + 10 // Invalid V value
 
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -103,20 +103,20 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
 		require.NoError(t, err)
 
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		// NOTE: We do NOT add a nonce change for Alice
 		// This simulates the authorization not being applied (e.g., wrong nonce, already applied, etc.)
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -150,14 +150,14 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 		charlieAuth, err := firehose.SignSetCodeAuth(CharlieKey, 1, AliceAddr, 0)
 		require.NoError(t, err)
 
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{aliceAuth, bobAuth, charlieAuth}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		// Add nonce changes for Alice and Bob (they get applied)
 		// Charlie's authorization does NOT get applied (no nonce change)
@@ -165,7 +165,7 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 		tester.NonceChange(BobAddr, 0, 1)
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -194,17 +194,17 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 
 	t.Run("empty_authorizations_list", func(t *testing.T) {
 		// SetCode transaction with empty authorization list should be valid
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -224,20 +224,20 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
 		require.NoError(t, err)
 
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		// Nonce change exists but doesn't match authorization's expected nonce
 		tester.NonceChange(AliceAddr, 5, 6) // Wrong nonce range
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -268,21 +268,21 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 		auth2, err := firehose.SignSetCodeAuth(AliceKey, 1, BobAddr, 0)
 		require.NoError(t, err)
 
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth1, auth2}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		// Only ONE nonce change for Alice (0→1)
 		// Both authorizations are from Alice with nonce=0, but only one can match
 		tester.NonceChange(AliceAddr, 0, 1)
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -326,20 +326,20 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			},
 		}
 
-		txEvent := new(TxEventBuilder).
+		txEvent := new(firehose.TxEventBuilder).
 			Defaults().
-			Type(TxTypeSetCode).
+			Type(firehose.TxTypeSetCode).
 			AccessList(accessList).
 			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
 			Build()
 
 		tester := NewTracerTester(t).StartBlock()
-		tester.Tracer.OnTxStart(txEvent, tester.mockStateDB)
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
 
 		tester.NonceChange(AliceAddr, 0, 1)
 
 		tester.
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {

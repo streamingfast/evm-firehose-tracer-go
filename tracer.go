@@ -229,6 +229,15 @@ func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConf
 
 // OnGenesisBlock is called for the genesis block
 func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnGenesisBlock(event, alloc)
+
+		defer func(previousValidator *nativeValidator) {
+			t.nativeValidator = previousValidator
+		}(t.nativeValidator)
+		t.nativeValidator = nil
+	}
+
 	if t.testingIgnoreGenesisBlock {
 		return
 	}
@@ -283,12 +292,14 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 	t.OnCallExit(0, nil, 0, nil, false) // Genesis synthetic call is at depth 0
 
 	// End the synthetic transaction with a successful receipt
+	// Include StateRoot from the genesis block header (matches native tracer behavior)
 	t.OnTxEnd(&ReceiptData{
 		TransactionIndex:  0,
 		Status:            1, // Success
 		GasUsed:           0,
 		CumulativeGasUsed: 0,
 		Logs:              nil,
+		StateRoot:         event.Block.Root[:], // Genesis block state root
 	}, nil)
 
 	// End the block
@@ -425,6 +436,11 @@ func (t *Tracer) OnSkippedBlock(event BlockEvent) {
 
 // OnClose is called when the tracer is being shut down
 func (t *Tracer) OnClose() {
+	// Call native validator right at the start (standard hook pattern)
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnClose()
+	}
+
 	if t.concurrentFlushQueue != nil {
 		t.concurrentFlushQueue.Close()
 	}
@@ -776,6 +792,7 @@ func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionRece
 	r := &pbeth.TransactionReceipt{
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
 		LogsBloom:         make([]byte, 256), // TODO: Compute logs bloom
+		StateRoot:         receipt.StateRoot,  // State root (for genesis blocks and pre-Byzantium)
 	}
 
 	// Add EIP-4844 blob fields for blob transactions (type 3)
@@ -1339,7 +1356,7 @@ func (t *Tracer) OnSystemCallEnd() {
 }
 
 // OnOpcode is called for each opcode (optional, for detailed tracing)
-func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScopeData, rData []byte, depth int, err error) {
+func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, rData []byte, depth int, err error) {
 	// Call native validator if present
 	if t.nativeValidator != nil {
 		t.nativeValidator.OnOpcode(pc, op, gas, cost, depth)
@@ -1356,28 +1373,51 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope OpcodeScop
 	activeCall.ExecutedCode = true
 
 	// The rest of the logic expects that a call succeeded, nothing to do more here if the interpreter failed on this OpCode
-	// if err != nil {
-	// 	return
-	// }
+	if err != nil {
+		return
+	}
 
-	// // The gas change must come first to retain Firehose backward compatibility. Indeed, before Firehose 3.0,
-	// // we had a specific method `OnKeccakPreimage` that was called during the KECCAK256 opcode. However, in
-	// // the new model, we do it through `OnOpcode`.
-	// //
-	// // The gas change recording in the previous Firehose patch was done before calling `OnKeccakPreimage` so
-	// // we must do the same here.
-	// //
-	// // No need to wrap in apply backward compatibility, the old behavior is fine in all cases.
-	// if cost > 0 {
-	// 	if reason, found := opCodeToGasChangeReasonMap[opCode]; found {
-	// 		activeCall.GasChanges = append(activeCall.GasChanges, f.newGasChange("state", gas, gas-cost, reason))
-	// 	}
-	// }
+	// The gas change must come first to retain Firehose backward compatibility. Indeed, before Firehose 3.0,
+	// we had a specific method `OnKeccakPreimage` that was called during the KECCAK256 opcode. However, in
+	// the new model, we do it through `OnOpcode`.
+	//
+	// The gas change recording in the previous Firehose patch was done before calling `OnKeccakPreimage` so
+	// we must do the same here.
+	//
+	// No need to wrap in apply backward compatibility, the old behavior is fine in all cases.
+	if cost > 0 {
+		if reason, found := opCodeToGasChangeReasonMap[op]; found {
+			activeCall.GasChanges = append(activeCall.GasChanges, t.newGasChange("state", gas, gas-cost, reason))
+		}
+	}
 
 	// Mark SELFDESTRUCT opcode (matching native tracer firehose.go:1193)
 	if op == 0xff { // SELFDESTRUCT opcode
 		activeCall.Suicide = true
 	}
+}
+
+// opCodeToGasChangeReasonMap maps opcodes to their gas change reasons
+// This allows tracking gas consumption per opcode type (matching native tracer firehose.go:1258)
+var opCodeToGasChangeReasonMap = map[byte]pbeth.GasChange_Reason{
+	0xf0: pbeth.GasChange_REASON_CONTRACT_CREATION,  // CREATE
+	0xf5: pbeth.GasChange_REASON_CONTRACT_CREATION2, // CREATE2
+	0xf1: pbeth.GasChange_REASON_CALL,               // CALL
+	0xfa: pbeth.GasChange_REASON_STATIC_CALL,        // STATICCALL
+	0xf2: pbeth.GasChange_REASON_CALL_CODE,          // CALLCODE
+	0xf4: pbeth.GasChange_REASON_DELEGATE_CALL,      // DELEGATECALL
+	0xf3: pbeth.GasChange_REASON_RETURN,             // RETURN
+	0xfd: pbeth.GasChange_REASON_REVERT,             // REVERT
+	0xa0: pbeth.GasChange_REASON_EVENT_LOG,          // LOG0
+	0xa1: pbeth.GasChange_REASON_EVENT_LOG,          // LOG1
+	0xa2: pbeth.GasChange_REASON_EVENT_LOG,          // LOG2
+	0xa3: pbeth.GasChange_REASON_EVENT_LOG,          // LOG3
+	0xa4: pbeth.GasChange_REASON_EVENT_LOG,          // LOG4
+	0xff: pbeth.GasChange_REASON_SELF_DESTRUCT,      // SELFDESTRUCT
+	0x37: pbeth.GasChange_REASON_CALL_DATA_COPY,     // CALLDATACOPY
+	0x39: pbeth.GasChange_REASON_CODE_COPY,          // CODECOPY
+	0x3c: pbeth.GasChange_REASON_EXT_CODE_COPY,      // EXTCODECOPY
+	0x3e: pbeth.GasChange_REASON_RETURN_DATA_COPY,   // RETURNDATACOPY
 }
 
 // OnKeccakPreimage is called when a keccak256 preimage is available
@@ -1411,7 +1451,7 @@ func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 // OnOpcodeFault is called when an opcode execution fails
 // This is called for opcodes that fault during execution (like invalid opcode, stack underflow, etc.)
 // The actual failure handling happens in OnCallExit when err != nil
-func (t *Tracer) OnOpcodeFault(pc uint64, op byte, gas, cost uint64, scope OpcodeScopeData, depth int, err error) {
+func (t *Tracer) OnOpcodeFault(pc uint64, op byte, gas, cost uint64, depth int, err error) {
 	// Call native validator if present
 	if t.nativeValidator != nil {
 		t.nativeValidator.OnOpcodeFault(pc, op, gas, cost, depth, err)
@@ -1427,9 +1467,6 @@ func (t *Tracer) OnOpcodeFault(pc uint64, op byte, gas, cost uint64, scope Opcod
 	// Set ExecutedCode to true (matches native tracer behavior in captureInterpreterStep)
 	// Even faulted opcodes count as executed code
 	call.ExecutedCode = true
-
-	// Note: StatusFailed and FailureReason are set in OnCallExit, not here
-	// The fault will propagate to OnCallExit as an error
 }
 
 // ============================================================================
@@ -1631,5 +1668,3 @@ func parseDelegation(code []byte) ([20]byte, bool) {
 	copy(addr[:], code[len(delegationPrefix):])
 	return addr, true
 }
-
-// toCommonAddress converts [20]byte to common.Address

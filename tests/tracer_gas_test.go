@@ -3,8 +3,6 @@ package tests
 import (
 	"testing"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go"
-
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
 )
@@ -21,7 +19,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 		// Gas changes where old == new should be ignored
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			GasChange(100000, 100000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			EndCall([]byte{}, 100000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -38,7 +36,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 		// Normal gas change during active call
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			GasChange(100000, 90000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
@@ -61,7 +59,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			GasChange(0, 21000, pbeth.GasChange_REASON_TX_INITIAL_BALANCE).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -81,7 +79,7 @@ func TestTracer_OnGasChange(t *testing.T) {
 		// Multiple gas changes in same transaction
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			GasChange(100000, 90000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			GasChange(90000, 80000, pbeth.GasChange_REASON_CODE_STORAGE).
 			GasChange(80000, 70000, pbeth.GasChange_REASON_STATE_COLD_ACCESS).
@@ -116,9 +114,9 @@ func TestTracer_OnGasChange(t *testing.T) {
 		// Gas changes in nested calls
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			GasChange(200000, 180000, pbeth.GasChange_REASON_CONTRACT_CREATION).
-			StartCallRaw(byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
+			StartCall(BobAddr, CharlieAddr, bigInt(0), 100000, []byte{}).
 			GasChange(100000, 90000, pbeth.GasChange_REASON_PRECOMPILED_CONTRACT).
 			EndCall([]byte{}, 90000).
 			EndCall([]byte{}, 180000).
@@ -172,7 +170,7 @@ func TestTracer_GasChangeReasons(t *testing.T) {
 		t.Run(reason.String(), func(t *testing.T) {
 			NewTracerTester(t).
 				StartBlockTrx(TestLegacyTrx).
-				StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+				StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 				GasChange(100000, 90000, reason).
 				EndCall([]byte{}, 90000).
 				EndBlockTrx(successReceipt(100000), nil, nil).

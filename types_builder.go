@@ -1,17 +1,8 @@
-package tests
+package firehose
 
 import (
-	firehose "github.com/streamingfast/evm-firehose-tracer-go"
+	"encoding/hex"
 	"math/big"
-)
-
-// Transaction types
-const (
-	TxTypeLegacy     = 0 // Legacy transaction (pre-EIP-2718)
-	TxTypeAccessList = 1 // EIP-2930 access list transaction
-	TxTypeDynamicFee = 2 // EIP-1559 dynamic fee transaction
-	TxTypeBlob       = 3 // EIP-4844 blob transaction
-	TxTypeSetCode    = 4 // EIP-7702 set code transaction
 )
 
 // BlockEventBuilder provides a fluent API for building blocks
@@ -25,14 +16,6 @@ type BlockEventBuilder struct {
 	difficulty *big.Int
 	size       uint64
 	bloom      []byte
-}
-
-// AtHeight sets the block number (and updates hash accordingly)
-func (b *BlockEventBuilder) AtHeight(number uint64) *BlockEventBuilder {
-	b.number = number
-	// Generate a deterministic hash based on height
-	b.hash = generateBlockHash(number)
-	return b
 }
 
 // Number sets the block number
@@ -90,13 +73,13 @@ func (b *BlockEventBuilder) Bloom(bloom []byte) *BlockEventBuilder {
 }
 
 // Build creates a BlockEvent
-func (b *BlockEventBuilder) Build() firehose.BlockEvent {
+func (b *BlockEventBuilder) Build() BlockEvent {
 	// IsMerge is true when difficulty is 0 (PoS blocks)
 	// This matches go-ethereum's blockIsMerge() logic
 	isMerge := b.difficulty != nil && b.difficulty.Sign() == 0
 
-	return firehose.BlockEvent{
-		Block: firehose.BlockData{
+	return BlockEvent{
+		Block: BlockData{
 			Number:     b.number,
 			Hash:       b.hash,
 			ParentHash: b.parentHash,
@@ -114,21 +97,26 @@ func (b *BlockEventBuilder) Build() firehose.BlockEvent {
 
 // TxEventBuilder provides a fluent API for building transactions
 type TxEventBuilder struct {
-	txType               uint8
-	hash                 [32]byte
-	from                 [20]byte
-	to                   [20]byte
-	value                *big.Int
-	gas                  uint64
-	gasPrice             *big.Int
-	nonce                uint64
-	data                 []byte
-	maxFeePerGas         *big.Int
-	maxPriorityFeePerGas *big.Int
-	accessList            firehose.AccessList
+	txType                uint8
+	hash                  [32]byte
+	from                  [20]byte
+	to                    [20]byte
+	value                 *big.Int
+	gas                   uint64
+	gasPrice              *big.Int
+	nonce                 uint64
+	data                  []byte
+	maxFeePerGas          *big.Int
+	maxPriorityFeePerGas  *big.Int
+	accessList            AccessList
 	blobGasFeeCap         *big.Int
 	blobHashes            [][32]byte
-	setCodeAuthorizations []firehose.SetCodeAuthorization
+	setCodeAuthorizations []SetCodeAuthorization
+}
+
+func NewTxEventBuilderFrom(other TxEvent) *TxEventBuilder {
+	return new(TxEventBuilder).
+		DefaultsFrom(other)
 }
 
 // Type sets the transaction type
@@ -137,7 +125,7 @@ func (t *TxEventBuilder) Type(txType uint8) *TxEventBuilder {
 	return t
 }
 
-// firehose.Hash sets the transaction hash
+// Hash sets the transaction hash
 func (t *TxEventBuilder) Hash(hash string) *TxEventBuilder {
 	t.hash = hashFromHex(hash)
 	return t
@@ -204,7 +192,7 @@ func (t *TxEventBuilder) MaxPriorityFeePerGas(maxPriorityFee *big.Int) *TxEventB
 }
 
 // AccessList sets the access list (EIP-2930/EIP-1559)
-func (t *TxEventBuilder) AccessList(accessList firehose.AccessList) *TxEventBuilder {
+func (t *TxEventBuilder) AccessList(accessList AccessList) *TxEventBuilder {
 	t.accessList = accessList
 	return t
 }
@@ -222,7 +210,7 @@ func (t *TxEventBuilder) BlobHashes(hashes [][32]byte) *TxEventBuilder {
 }
 
 // SetCodeAuthorizations sets the set code authorization list (EIP-7702)
-func (t *TxEventBuilder) SetCodeAuthorizations(authList []firehose.SetCodeAuthorization) *TxEventBuilder {
+func (t *TxEventBuilder) SetCodeAuthorizations(authList []SetCodeAuthorization) *TxEventBuilder {
 	t.setCodeAuthorizations = authList
 	return t
 }
@@ -239,14 +227,14 @@ func (t *TxEventBuilder) SetCodeAuthorizations(authList []firehose.SetCodeAuthor
 // - MaxFeePerGas: 20 wei (for EIP-1559 transactions)
 // - MaxPriorityFeePerGas: 2 wei (for EIP-1559 transactions)
 //
-// Does NOT set: firehose.AccessList, BlobGasFeeCap, BlobHashes, firehose.SetCodeAuthorizations
+// Does NOT set: AccessList, BlobGasFeeCap, BlobHashes, SetCodeAuthorizations
 // (these should be set explicitly when needed)
 func (t *TxEventBuilder) Defaults() *TxEventBuilder {
 	return t.
 		Type(TxTypeLegacy).
 		Hash("0x0000000000000000000000000000000000000000000000000000000000000000").
-		From(Alice).
-		To(Bob).
+		// From(Alice).
+		// To(Bob).
 		Value(bigInt(100)).
 		Gas(21000).
 		GasPrice(bigInt(10)).
@@ -255,8 +243,22 @@ func (t *TxEventBuilder) Defaults() *TxEventBuilder {
 		MaxPriorityFeePerGas(bigInt(2))
 }
 
-func (t *TxEventBuilder) Build() firehose.TxEvent {
-	return firehose.TxEvent{
+func (t *TxEventBuilder) DefaultsFrom(other TxEvent) *TxEventBuilder {
+	return t.
+		Type(other.Type).
+		Hash(hex.EncodeToString(other.Hash[:])).
+		From(hex.EncodeToString(other.From[:])).
+		To(hex.EncodeToString(other.To[:])).
+		Value(other.Value).
+		Gas(other.Gas).
+		GasPrice(other.GasPrice).
+		Nonce(other.Nonce).
+		MaxFeePerGas(other.MaxFeePerGas).
+		MaxPriorityFeePerGas(other.MaxPriorityFeePerGas)
+}
+
+func (t *TxEventBuilder) Build() TxEvent {
+	return TxEvent{
 		Type:                  t.txType,
 		Hash:                  t.hash,
 		From:                  t.from,
@@ -277,32 +279,12 @@ func (t *TxEventBuilder) Build() firehose.TxEvent {
 
 // Helper functions
 
-// generateBlockHash generates a deterministic hash for a block number
-func generateBlockHash(number uint64) [32]byte {
-	var hash [32]byte
-	// Simple deterministic generation (block number in the first 8 bytes)
-	for i := 0; i < 8; i++ {
-		hash[i] = byte(number >> (i * 8))
-	}
-	// Fill rest with a pattern
-	for i := 8; i < 32; i++ {
-		hash[i] = byte(i * 3)
-	}
-	return hash
-}
-
 // ethToWei converts ETH to wei
 func ethToWei(eth float64) *big.Int {
 	// 1 ETH = 10^18 wei
 	wei := new(big.Float).Mul(big.NewFloat(eth), big.NewFloat(1e18))
 	result, _ := wei.Int(nil)
 	return result
-}
-
-// gweiToWei converts gwei to wei
-func gweiToWei(gwei int64) *big.Int {
-	// 1 gwei = 10^9 wei
-	return new(big.Int).Mul(big.NewInt(gwei), big.NewInt(1e9))
 }
 
 // hashFromHex converts a hex string to a 32-byte hash
@@ -363,12 +345,3 @@ func hexCharToByte(c byte) byte {
 	}
 	return 0
 }
-
-// Common test addresses (for readability in tests)
-// These are derived from deterministic private keys defined in testing_helpers.go
-var (
-	Alice   = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
-	Bob     = "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
-	Charlie = "0x6813eb9362372eef6200f3b1dbc3f819671cba69"
-	Miner   = "0x1eff47bc3a10a45d4b230b5d10e37751fe6aa718"
-)

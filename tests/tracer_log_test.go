@@ -18,7 +18,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
@@ -45,7 +45,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
@@ -69,7 +69,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
@@ -94,7 +94,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
@@ -120,7 +120,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
@@ -151,7 +151,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics1, data1, 0).
 			Log(BobAddr, topics2, data2, 1).
 			Log(BobAddr, topics3, data3, 2).
@@ -187,9 +187,9 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			Log(BobAddr, topics1, data1, 0).
-			StartCallRaw(byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
+			StartCall(BobAddr, CharlieAddr, bigInt(0), 100000, []byte{}).
 			Log(CharlieAddr, topics2, data2, 1).
 			EndCall([]byte{}, 90000).
 			EndCall([]byte{}, 180000).
@@ -219,7 +219,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, emptyData, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
@@ -246,7 +246,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, largeData, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{
@@ -272,7 +272,7 @@ func TestTracer_OnLog(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
 			Log(BobAddr, topics, data, 0).
 			EndCall([]byte{}, 90000).
 			EndBlockTrx(receiptWithLogs(100000, []firehose.LogData{

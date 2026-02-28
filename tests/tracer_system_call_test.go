@@ -3,8 +3,6 @@ package tests
 import (
 	"testing"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go"
-
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
 )
@@ -30,7 +28,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			).
 			// Then regular transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -69,7 +67,7 @@ func TestTracer_SystemCall(t *testing.T) {
 				45_000,
 			).
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -107,7 +105,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			).
 			// Then transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -139,13 +137,13 @@ func TestTracer_SystemCall(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			StartSystemCall().
-			StartCallRaw(byte(firehose.CallTypeCall), SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, bigInt(0)).
+			StartCall(SystemAddress, BeaconRootsAddress, bigInt(0), 30_000_000, beaconRoot[:]).
 			// System call modifies storage
 			StorageChange(BeaconRootsAddress, storageKey, zeroVal, storageValue).
 			EndCall([]byte{}, 50_000).
 			EndSystemCall().
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -169,12 +167,12 @@ func TestTracer_SystemCall(t *testing.T) {
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
 			// First transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Second transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(CharlieAddr, MinerAddr, bigInt(200), 21000, []byte{}).
+			StartCall(CharlieAddr, MinerAddr, bigInt(200), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -197,7 +195,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			StartBlock().
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -241,7 +239,7 @@ func TestTracer_SystemCall(t *testing.T) {
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot1[:], 30_000_000, []byte{}, 50_000).
 			// Transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Second system call

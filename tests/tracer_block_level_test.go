@@ -18,7 +18,7 @@ func TestTracer_BlockLevelBalanceChanges(t *testing.T) {
 			StartBlock().
 			// Transaction happens
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Block-level reward (outside transaction)
@@ -68,7 +68,7 @@ func TestTracer_BlockLevelBalanceChanges(t *testing.T) {
 		NewTracerTester(t).
 			StartBlock().
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), gasUsed, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), gasUsed, []byte{}).
 			EndCall([]byte{}, gasUsed).
 			EndTrx(successReceipt(gasUsed), nil).
 			// Transaction fee reward to miner
@@ -94,12 +94,12 @@ func TestTracer_BlockLevelBalanceChanges(t *testing.T) {
 			StartBlock().
 			// First transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Second transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(BobAddr, CharlieAddr, bigInt(50), 21000, []byte{}).
+			StartCall(BobAddr, CharlieAddr, bigInt(50), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Block-level rewards
@@ -156,7 +156,7 @@ func TestTracer_BlockLevelCodeChanges(t *testing.T) {
 			StartBlock().
 			// Transaction happens first
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Block-level code change (outside transaction)
@@ -279,7 +279,7 @@ func TestTracer_BlockLevelWithdrawals(t *testing.T) {
 			StartBlock().
 			// Transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Withdrawal after transaction
@@ -307,7 +307,7 @@ func TestTracer_BlockLevelWithdrawals(t *testing.T) {
 			StartBlock().
 			// Transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Block-level state changes
@@ -346,7 +346,7 @@ func TestTracer_ComplexBlockScenarios(t *testing.T) {
 			SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30_000_000, []byte{}, 50_000).
 			// Transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Block-level state changes
@@ -390,7 +390,7 @@ func TestTracer_ComplexBlockScenarios(t *testing.T) {
 			SystemCall(SystemAddress, HistoryStorageAddress, parentHash[:], 30_000_000, []byte{}, 45_000).
 			// Transaction
 			StartTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
 			EndCall([]byte{}, 21000).
 			EndTrx(successReceipt(21000), nil).
 			// Rewards

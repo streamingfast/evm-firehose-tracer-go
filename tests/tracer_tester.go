@@ -19,6 +19,15 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Common test addresses (for readability in tests)
+// These are derived from deterministic private keys defined in testing_helpers.go
+var (
+	Alice   = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+	Bob     = "0x2b5ad5c4795c026514f8317c7a215e218dccd6cf"
+	Charlie = "0x6813eb9362372eef6200f3b1dbc3f819671cba69"
+	Miner   = "0x1eff47bc3a10a45d4b230b5d10e37751fe6aa718"
+)
+
 // Test error constants matching VM errors from go-ethereum
 // We use the actual VM errors so that both the native validator (which uses errors.Is)
 // and the shared tracer (which uses errorIsString) can recognize them correctly
@@ -39,7 +48,7 @@ var (
 // The size is the RLP-encoded size that Geth computes for this block.
 // If you change any block parameters (timestamp, coinbase, etc.), you MUST recompute
 // the hash and size by running the test and copying values from the native tracer output.
-var TestBlock = (&BlockEventBuilder{}).
+var TestBlock = (&firehose.BlockEventBuilder{}).
 	Number(100).
 	Hash("0xe74fcc728df762055c71a999736bb89dd47c541807c3021a1b94de6761afaf25"). // Computed by native Geth tracer with new addresses
 	ParentHash("0x0000000000000000000000000000000000000000000000000000000000000063").
@@ -53,8 +62,8 @@ var TestBlock = (&BlockEventBuilder{}).
 
 // TestLegacyTrx provides a legacy (type 0) test transaction
 // The hash is computed at runtime by the native validator in OnTxStart
-var TestLegacyTrx = new(TxEventBuilder).
-	Type(TxTypeLegacy).
+var TestLegacyTrx = new(firehose.TxEventBuilder).
+	Type(firehose.TxTypeLegacy).
 	Hash("0x0000000000000000000000000000000000000000000000000000000000000000"). // Placeholder, computed by native validator
 	From(Alice).
 	To(Bob).
@@ -65,8 +74,8 @@ var TestLegacyTrx = new(TxEventBuilder).
 	Build()
 
 // TestAccessListTrx provides an EIP-2930 access list (type 1) test transaction
-var TestAccessListTrx = new(TxEventBuilder).
-	Type(TxTypeAccessList).
+var TestAccessListTrx = new(firehose.TxEventBuilder).
+	Type(firehose.TxTypeAccessList).
 	Hash("0x0000000000000000000000000000000000000000000000000000000000000001"). // Placeholder
 	From(Alice).
 	To(Bob).
@@ -80,8 +89,8 @@ var TestAccessListTrx = new(TxEventBuilder).
 	Build()
 
 // TestDynamicFeeTrx provides an EIP-1559 dynamic fee (type 2) test transaction
-var TestDynamicFeeTrx = new(TxEventBuilder).
-	Type(TxTypeDynamicFee).
+var TestDynamicFeeTrx = new(firehose.TxEventBuilder).
+	Type(firehose.TxTypeDynamicFee).
 	Hash("0x0000000000000000000000000000000000000000000000000000000000000002"). // Placeholder
 	From(Alice).
 	To(Bob).
@@ -97,8 +106,8 @@ var TestDynamicFeeTrx = new(TxEventBuilder).
 	Build()
 
 // TestBlobTrx provides an EIP-4844 blob (type 3) test transaction
-var TestBlobTrx = new(TxEventBuilder).
-	Type(TxTypeBlob).
+var TestBlobTrx = new(firehose.TxEventBuilder).
+	Type(firehose.TxTypeBlob).
 	Hash("0x0000000000000000000000000000000000000000000000000000000000000003"). // Placeholder
 	From(Alice).
 	To(Bob).
@@ -117,8 +126,8 @@ var TestBlobTrx = new(TxEventBuilder).
 // TestSetCodeTrx provides an EIP-7702 set code (type 4) test transaction
 // NOTE: This uses placeholder signatures. For proper validation tests,
 // use CreateValidSetCodeTrxEvent() from eip7702_test.go
-var TestSetCodeTrx = new(TxEventBuilder).
-	Type(TxTypeSetCode).
+var TestSetCodeTrx = new(firehose.TxEventBuilder).
+	Type(firehose.TxTypeSetCode).
 	Hash("0x0000000000000000000000000000000000000000000000000000000000000004"). // Placeholder
 	From(Alice).
 	To(Bob).
@@ -144,8 +153,7 @@ var TestSetCodeTrx = new(TxEventBuilder).
 type TracerTester struct {
 	t *testing.T
 
-	Block  *BlockEventBuilder
-	Tracer *firehose.Tracer
+	tracer *firehose.Tracer
 
 	// mockStateDB for providing blockchain state to the tracer
 	// Wraps the native validator's mockStateDB
@@ -180,7 +188,7 @@ func NewTracerTesterPrague(t *testing.T) *TracerTester {
 func newTracerTesterWithConfig(t *testing.T, chainConfig *firehose.ChainConfig) *TracerTester {
 	tester := &TracerTester{
 		t: t,
-		Tracer: firehose.NewTracer(&firehose.Config{
+		tracer: firehose.NewTracer(&firehose.Config{
 			ChainConfig:  chainConfig,
 			OutputWriter: &bytes.Buffer{},
 		}),
@@ -190,9 +198,9 @@ func newTracerTesterWithConfig(t *testing.T, chainConfig *firehose.ChainConfig) 
 	var err error
 	nv, err := firehose.NewTestingNativeValidator("")
 	require.NoError(t, err, "creating native validator")
-	tester.Tracer.SetTestingNativeValidator(nv)
+	tester.tracer.SetTestingNativeValidator(nv)
 
-	tester.Tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
+	tester.tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
 
 	return tester
 }
@@ -224,70 +232,58 @@ func (s *TracerTester) SetMockStateExist(addr [20]byte, exists bool) *TracerTest
 }
 
 func (s *TracerTester) StartBlock() *TracerTester {
-	s.Tracer.OnBlockStart(TestBlock)
+	s.tracer.OnBlockStart(TestBlock)
 	return s
 }
 
 // StartBlockTrx starts a block and a transaction
 func (s *TracerTester) StartBlockTrx(tx firehose.TxEvent) *TracerTester {
-	s.Tracer.OnBlockStart(TestBlock)
-	s.Tracer.OnTxStart(tx, s.mockStateDB)
+	s.tracer.OnBlockStart(TestBlock)
+	s.tracer.OnTxStart(tx, s.mockStateDB)
 	return s
 }
 
 // StartTrx starts a transaction without starting a block. Use this for testing transaction tracing in isolation.
 func (s *TracerTester) StartTrx(tx firehose.TxEvent) *TracerTester {
-	s.Tracer.OnTxStart(tx, s.mockStateDB)
+	s.tracer.OnTxStart(tx, s.mockStateDB)
 	return s
-}
-
-// StartCallRaw begins a call context
-// Automatically manages depth: uses current depth, then increments for nested calls
-func (s *TracerTester) StartCallRaw(typ byte, from, to [20]byte, input []byte, gas uint64, value *big.Int) *TracerTester {
-	s.Tracer.OnCallEnter(s.depth, typ, from, to, input, gas, value)
-	s.depth++
-	return s
-}
-
-func (s *TracerTester) StartRootCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	s.depth = 0 // Reset depth for root call
-	return s.StartCallRaw(byte(firehose.CallTypeCall), from, to, input, gas, value)
-}
-
-func (s *TracerTester) StartRootCreateCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	s.depth = 0 // Reset depth for root call
-	return s.StartCallRaw(byte(firehose.CallTypeCreate), from, to, input, gas, value)
 }
 
 func (s *TracerTester) StartCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(byte(firehose.CallTypeCall), from, to, input, gas, value)
+	return s.startCallRaw(byte(firehose.CallTypeCall), from, to, input, gas, value)
 }
 
 func (s *TracerTester) StartStaticCall(from, to [20]byte, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(byte(firehose.CallTypeStaticCall), from, to, input, gas, nil)
+	return s.startCallRaw(byte(firehose.CallTypeStaticCall), from, to, input, gas, nil)
 }
 
 func (s *TracerTester) StartCreateCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(byte(firehose.CallTypeCreate), from, to, input, gas, value)
+	return s.startCallRaw(byte(firehose.CallTypeCreate), from, to, input, gas, value)
 }
 
 func (s *TracerTester) StartCreate2Call(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(byte(firehose.CallTypeCreate2), from, to, input, gas, value)
+	return s.startCallRaw(byte(firehose.CallTypeCreate2), from, to, input, gas, value)
 }
 
 func (s *TracerTester) StartDelegateCall(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(byte(firehose.CallTypeDelegateCall), from, to, input, gas, value)
+	return s.startCallRaw(byte(firehose.CallTypeDelegateCall), from, to, input, gas, value)
 }
 
 func (s *TracerTester) StartCallCode(from, to [20]byte, value *big.Int, gas uint64, input []byte) *TracerTester {
-	return s.StartCallRaw(byte(firehose.CallTypeCallCode), from, to, input, gas, value)
+	return s.startCallRaw(byte(firehose.CallTypeCallCode), from, to, input, gas, value)
+}
+
+func (s *TracerTester) startCallRaw(typ byte, from, to [20]byte, input []byte, gas uint64, value *big.Int) *TracerTester {
+	s.tracer.OnCallEnter(s.depth, typ, from, to, input, gas, value)
+	s.depth++
+	return s
 }
 
 // EndCall ends a call context successfully
 // Automatically manages depth: decrements depth and passes it to OnCallExit
 func (s *TracerTester) EndCall(output []byte, gasUsed uint64) *TracerTester {
 	s.depth--
-	s.Tracer.OnCallExit(s.depth, output, gasUsed, nil, false)
+	s.tracer.OnCallExit(s.depth, output, gasUsed, nil, false)
 	return s
 }
 
@@ -295,17 +291,17 @@ func (s *TracerTester) EndCall(output []byte, gasUsed uint64) *TracerTester {
 // Automatically manages depth: decrements depth and passes it to OnCallExit
 func (s *TracerTester) EndCallFailed(output []byte, gasUsed uint64, err error, reverted bool) *TracerTester {
 	s.depth--
-	s.Tracer.OnCallExit(s.depth, output, gasUsed, err, reverted)
+	s.tracer.OnCallExit(s.depth, output, gasUsed, err, reverted)
 	return s
 }
 
 // firehose.OpCode simulates an opcode execution to trigger ExecutedCode setting
 // This ensures both shared and native tracers set ExecutedCode correctly
 func (s *TracerTester) OpCode(pc uint64, op byte, gas, cost uint64) *TracerTester {
-	// Call shared tracer's OnOpcode with empty scope data
+	// Call shared tracer's OnOpcode
 	// This will call the native validator internally if present
-	emptyScope := firehose.OpcodeScopeData{}
-	s.Tracer.OnOpcode(pc, op, gas, cost, emptyScope, nil, s.depth-1, nil)
+	activeCallDepth := s.depth - 1 // Depth of the active call
+	s.tracer.OnOpcode(pc, op, gas, cost, []byte{}, activeCallDepth, nil)
 
 	return s
 }
@@ -315,7 +311,7 @@ func (s *TracerTester) OpCode(pc uint64, op byte, gas, cost uint64) *TracerTeste
 func (s *TracerTester) Keccak(hash [32]byte, preimage []byte) *TracerTester {
 	// Call shared tracer's OnKeccakPreimage
 	// This will call the native validator internally if present
-	s.Tracer.OnKeccakPreimage(hash, preimage)
+	s.tracer.OnKeccakPreimage(hash, preimage)
 
 	return s
 }
@@ -325,46 +321,45 @@ func (s *TracerTester) Keccak(hash [32]byte, preimage []byte) *TracerTester {
 func (s *TracerTester) OpCodeFault(pc uint64, op byte, gas, cost uint64, err error) *TracerTester {
 	// Call shared tracer's OnOpcodeFault
 	// This will call the native validator internally if present
-	emptyScope := firehose.OpcodeScopeData{}
 	activeCallDepth := s.depth - 1 // Depth of the active call
-	s.Tracer.OnOpcodeFault(pc, op, gas, cost, emptyScope, activeCallDepth, err)
+	s.tracer.OnOpcodeFault(pc, op, gas, cost, activeCallDepth, err)
 
 	return s
 }
 
 // BalanceChange records a balance change
 func (s *TracerTester) BalanceChange(addr [20]byte, oldBalance, newBalance *big.Int, reason pbeth.BalanceChange_Reason) *TracerTester {
-	s.Tracer.OnBalanceChange(addr, oldBalance, newBalance, reason)
+	s.tracer.OnBalanceChange(addr, oldBalance, newBalance, reason)
 	return s
 }
 
 // NonceChange records a nonce change
 func (s *TracerTester) NonceChange(addr [20]byte, oldNonce, newNonce uint64) *TracerTester {
-	s.Tracer.OnNonceChange(addr, oldNonce, newNonce)
+	s.tracer.OnNonceChange(addr, oldNonce, newNonce)
 	return s
 }
 
 // CodeChange records a code change
 func (s *TracerTester) CodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]byte, oldCode, newCode []byte) *TracerTester {
-	s.Tracer.OnCodeChange(addr, prevCodeHash, newCodeHash, oldCode, newCode)
+	s.tracer.OnCodeChange(addr, prevCodeHash, newCodeHash, oldCode, newCode)
 	return s
 }
 
 // StorageChange records a storage change
 func (s *TracerTester) StorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) *TracerTester {
-	s.Tracer.OnStorageChange(addr, slot, oldValue, newValue)
+	s.tracer.OnStorageChange(addr, slot, oldValue, newValue)
 	return s
 }
 
 // GasChange records a gas change
 func (s *TracerTester) GasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) *TracerTester {
-	s.Tracer.OnGasChange(oldGas, newGas, reason)
+	s.tracer.OnGasChange(oldGas, newGas, reason)
 	return s
 }
 
 // Log records a log event
 func (s *TracerTester) Log(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) *TracerTester {
-	s.Tracer.OnLog(addr, topics, data, blockIndex)
+	s.tracer.OnLog(addr, topics, data, blockIndex)
 	return s
 }
 
@@ -391,14 +386,13 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 	// - Set call.Suicide = true (for SELFDESTRUCT opcode)
 	// - Set call.ExecutedCode = true (always set by OnOpcode)
 	// - Call the native validator internally if present
-	emptyScope := firehose.OpcodeScopeData{}
-	s.Tracer.OnOpcode(0, 0xff, 0, 0, emptyScope, nil, activeCallDepth, nil) // op=0xff is SELFDESTRUCT
+	s.tracer.OnOpcode(0, 0xff, 0, 0, []byte{}, activeCallDepth, nil) // op=0xff is SELFDESTRUCT
 
 	// Step 2: Trigger OnCallEnter(SELFDESTRUCT) at depth = active_call_depth + 1
 	// This sets latestCallEnterSuicided flag (matching firehose.go:1040-1041)
 	selfDestructDepth := activeCallDepth + 1 // SELFDESTRUCT is signaled as a nested operation
 
-	s.Tracer.OnCallEnter(
+	s.tracer.OnCallEnter(
 		selfDestructDepth,
 		byte(firehose.CallTypeSelfDestruct),
 		contractAddr,    // from: contract being destructed
@@ -410,7 +404,7 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 
 	// Apply balance changes in the order Ethereum emits them:
 	// 1. SUICIDE_WITHDRAW: Contract balance goes to 0
-	s.Tracer.OnBalanceChange(
+	s.tracer.OnBalanceChange(
 		contractAddr,
 		contractBalance,
 		big.NewInt(0),
@@ -427,7 +421,7 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 		beneficiaryOldBalance = big.NewInt(0)
 	}
 
-	s.Tracer.OnBalanceChange(
+	s.tracer.OnBalanceChange(
 		beneficiaryAddr,
 		beneficiaryOldBalance,
 		new(big.Int).Add(beneficiaryOldBalance, contractBalance),
@@ -439,7 +433,7 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 	// - Call the native validator with the correct depth
 	// - Check latestCallEnterSuicided and skip processing
 	// - Clear the flag so subsequent OnCallExit (for the real call) works correctly
-	s.Tracer.OnCallExit(selfDestructDepth, []byte{}, 0, nil, false)
+	s.tracer.OnCallExit(selfDestructDepth, []byte{}, 0, nil, false)
 
 	return s
 }
@@ -448,13 +442,13 @@ func (s *TracerTester) Suicide(contractAddr, beneficiaryAddr [20]byte, contractB
 // System calls are special protocol-level calls that happen outside of regular transactions
 // Examples: Beacon root updates (EIP-4788), parent hash storage (EIP-2935), withdrawal queue (EIP-7002)
 func (s *TracerTester) StartSystemCall() *TracerTester {
-	s.Tracer.OnSystemCallStart()
+	s.tracer.OnSystemCallStart()
 	return s
 }
 
 // EndSystemCall ends a system call
 func (s *TracerTester) EndSystemCall() *TracerTester {
-	s.Tracer.OnSystemCallEnd()
+	s.tracer.OnSystemCallEnd()
 	return s
 }
 
@@ -473,29 +467,29 @@ func (s *TracerTester) EndSystemCall() *TracerTester {
 //
 //	SystemCall(SystemAddress, BeaconRootsAddress, beaconRoot[:], 30000000, []byte{}, 50000)
 func (s *TracerTester) SystemCall(from, to [20]byte, input []byte, gas uint64, output []byte, gasUsed uint64) *TracerTester {
-	s.Tracer.OnSystemCallStart()
-	s.Tracer.OnCallEnter(0, byte(firehose.CallTypeCall), from, to, input, gas, big.NewInt(0))
-	s.Tracer.OnCallExit(0, output, gasUsed, nil, false) // System calls are at depth 0
-	s.Tracer.OnSystemCallEnd()
+	s.tracer.OnSystemCallStart()
+	s.tracer.OnCallEnter(0, byte(firehose.CallTypeCall), from, to, input, gas, big.NewInt(0))
+	s.tracer.OnCallExit(0, output, gasUsed, nil, false) // System calls are at depth 0
+	s.tracer.OnSystemCallEnd()
 	return s
 }
 
 // EndTrx ends the current transaction without ending the block
 // Use this when you have multiple transactions in the same block
 func (s *TracerTester) EndTrx(receipt *firehose.ReceiptData, txErr error) *TracerTester {
-	s.Tracer.OnTxEnd(receipt, txErr)
+	s.tracer.OnTxEnd(receipt, txErr)
 	return s
 }
 
 // EndBlockTrx ends the transaction and block with an optional error
 func (s *TracerTester) EndBlockTrx(receipt *firehose.ReceiptData, txErr, blockErr error) *TracerTester {
-	s.Tracer.OnTxEnd(receipt, txErr)
-	s.Tracer.OnBlockEnd(blockErr)
+	s.tracer.OnTxEnd(receipt, txErr)
+	s.tracer.OnBlockEnd(blockErr)
 	return s
 }
 
 func (s *TracerTester) EndBlock(err error) *TracerTester {
-	s.Tracer.OnBlockEnd(err)
+	s.tracer.OnBlockEnd(err)
 	return s
 }
 
@@ -560,14 +554,14 @@ func (s *TracerTester) GenesisBlock(blockNumber uint64, blockHash [32]byte, allo
 		},
 	}
 
-	s.Tracer.OnGenesisBlock(event, alloc)
+	s.tracer.OnGenesisBlock(event, alloc)
 
 	return s
 }
 
 func (s *TracerTester) Validate(validateFunc func(block *pbeth.Block)) {
-	block := ParseFirehoseBlock(s.t, "shared tracer", s.Tracer.GetTestingOutputBuffer())
-	nativeBlock := ParseFirehoseBlock(s.t, "native tracer", s.Tracer.GetNativeTracerBuffer())
+	block := ParseFirehoseBlock(s.t, "shared tracer", s.tracer.GetTestingOutputBuffer())
+	nativeBlock := ParseFirehoseBlock(s.t, "native tracer", s.tracer.GetNativeTracerBuffer())
 
 	if !proto.Equal(block, nativeBlock) {
 		require.EqualExportedValues(s.t, nativeBlock, block)
@@ -576,12 +570,21 @@ func (s *TracerTester) Validate(validateFunc func(block *pbeth.Block)) {
 	validateFunc(block)
 }
 
-// ParseFirehoseBlock parses a block from FIRE BLOCK output format
+// ParseFirehoseBlock parses a single block from FIRE BLOCK output format
+// This is a convenience wrapper around ParseFirehoseBlocks that returns the first block
 func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.Block {
+	blocks := ParseFirehoseBlocks(t, tag, buffer)
+	require.NotEmpty(t, blocks, "For %s: no FIRE BLOCK found in buffer", tag)
+	return blocks[0]
+}
+
+// ParseFirehoseBlocks parses all blocks from FIRE BLOCK output format
+// Returns a slice of blocks in the order they appear in the output
+func ParseFirehoseBlocks(t *testing.T, tag string, buffer *bytes.Buffer) []*pbeth.Block {
 	scanner := bufio.NewScanner(buffer)
 
 	var initSeen bool
-	var block *pbeth.Block
+	var blocks []*pbeth.Block
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -619,7 +622,7 @@ func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.B
 			require.NoError(t, err, "For %s: base64 payload decode", tag)
 
 			// Unmarshal protobuf
-			block = &pbeth.Block{}
+			block := &pbeth.Block{}
 			err = proto.Unmarshal(payloadBytes, block)
 			require.NoError(t, err, "For %s: protobuf unmarshal", tag)
 
@@ -628,14 +631,12 @@ func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.B
 			require.NoError(t, err, "For %s: parse block number from FIRE BLOCK header", tag)
 			require.Equal(t, blockNum, block.Number, "For %s: block number in header should match protobuf", tag)
 
-			// We found the block, return it
-			return block
+			blocks = append(blocks, block)
 		}
 	}
 
 	require.NoError(t, scanner.Err(), "For %s: reading buffer", tag)
-	require.Fail(t, "For %s: no FIRE BLOCK found in buffer", tag)
-	return nil
+	return blocks
 }
 
 // mockStateDB is a minimal StateDB stub for testing

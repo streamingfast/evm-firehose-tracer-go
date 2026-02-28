@@ -23,7 +23,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(1000000), 200000, []byte{}). // 1 ETH value transfer
+			StartCall(AliceAddr, BobAddr, bigInt(1000000), 200000, []byte{}). // 1 ETH value transfer
 			// Balance changes during value transfer
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9000000), pbeth.BalanceChange_REASON_TRANSFER).
 			BalanceChange(BobAddr, bigInt(0), bigInt(1000000), pbeth.BalanceChange_REASON_TRANSFER).
@@ -68,7 +68,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 200000, []byte{}).
 			CodeChange(BobAddr, prevHash, codeHash, nil, deployedCode).
 			StorageChange(BobAddr, storageKey, zeroVal, storageVal).
 			Log(BobAddr, logTopics, logData, 0).
@@ -117,7 +117,7 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(500000), 300000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(500000), 300000, []byte{}).
 			// All state change types
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9500000), pbeth.BalanceChange_REASON_TRANSFER).
 			NonceChange(AliceAddr, 5, 6).
@@ -173,11 +173,11 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 300000, []byte{}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 300000, []byte{}).
 			// Root call: balance change
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9900000), pbeth.BalanceChange_REASON_TRANSFER).
 			// Nested call
-			StartCallRaw(byte(firehose.CallTypeCall), BobAddr, CharlieAddr, []byte{}, 100000, bigInt(0)).
+			StartCall(BobAddr, CharlieAddr, bigInt(0), 100000, []byte{}).
 			StorageChange(CharlieAddr, storageKey, zeroVal, storageVal).
 			Log(CharlieAddr, logTopics, logData, 0).
 			EndCall([]byte{}, 90000).

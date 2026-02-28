@@ -78,6 +78,15 @@ type FinalizedBlockRef struct {
 	Hash   [32]byte
 }
 
+// Transaction types
+const (
+	TxTypeLegacy     = 0 // Legacy transaction (pre-EIP-2718)
+	TxTypeAccessList = 1 // EIP-2930 access list transaction
+	TxTypeDynamicFee = 2 // EIP-1559 dynamic fee transaction
+	TxTypeBlob       = 3 // EIP-4844 blob transaction
+	TxTypeSetCode    = 4 // EIP-7702 set code transaction
+)
+
 // TxEvent contains the data needed for OnTxStart
 type TxEvent struct {
 	Type     uint8
@@ -134,6 +143,7 @@ type ReceiptData struct {
 	CumulativeGasUsed uint64
 	BlobGasUsed       uint64   // EIP-4844: Gas used for blob data
 	BlobGasPrice      *big.Int // EIP-4844: Price per unit of blob gas
+	StateRoot         []byte   // State root after transaction execution (for genesis blocks and pre-Byzantium)
 }
 
 // LogData contains log event data
@@ -167,14 +177,6 @@ const (
 	CallTypeStaticCall   CallType = 0xfa // STATICCALL opcode
 	CallTypeSelfDestruct CallType = 0xff // SELFDESTRUCT opcode (placeholder, handled specially)
 )
-
-// OpcodeScopeData contains the execution scope for an opcode
-type OpcodeScopeData struct {
-	Memory   []byte
-	Stack    [][]byte
-	Contract []byte
-	CodeAddr [20]byte
-}
 
 // Address represents an Ethereum address (20 bytes)
 // Can be used interchangeably with common.Address from go-ethereum
@@ -244,6 +246,8 @@ var BigIntZero = big.NewInt(0)
 
 // BigIntOne is a shared one big.Int for convenience
 var BigIntOne = big.NewInt(1)
+
+func bigInt(i int64) *big.Int { return big.NewInt(i) }
 
 // bigIntToProtobuf converts a big.Int to protobuf BigInt
 // Matches the semantics of firehoseBigIntFromNative in go-ethereum:

@@ -43,7 +43,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// This tests the receipt == nil path at tracer.go:672
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{0x42}, 95000).
 			EndBlockTrx(nil, nil, nil). // No receipt
 			Validate(func(block *pbeth.Block) {
@@ -73,7 +73,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Verifies that reverted status is still set even without receipt
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCallFailed([]byte("error"), 95000, testErrExecutionReverted, true).
 			EndBlockTrx(nil, nil, nil). // No receipt
 			Validate(func(block *pbeth.Block) {
@@ -98,7 +98,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall(returnData, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -118,7 +118,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Scenario: Empty return data should be handled correctly
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{}, 95000). // Empty return data
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -133,7 +133,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Scenario: Nil return data should be handled correctly
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall(nil, 95000). // Nil return data
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -151,7 +151,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// This tests tracer.go:698
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCallFailed([]byte("error"), 95000, testErrExecutionReverted, true).
 			EndBlockTrx(failedReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -171,7 +171,7 @@ func TestTracer_CompleteTransaction_EdgeCases(t *testing.T) {
 		// Simplified test here just verifies the concept
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 50000, []byte{0x01}).
 			EndCall([]byte{}, 45000).
 			EndBlockTrx(successReceipt(50000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -204,12 +204,12 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 		tester := NewTracerTester(t)
 		tester.StartBlockTrx(TestBlobTrx)
 
-		tester.StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+		tester.StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{}, 95000).
 			EndBlockTrx(receipt, nil, nil)
 
 		// Parse the block output (skip native validator comparison since we manually set the type)
-		block := ParseFirehoseBlock(t, "shared tracer", tester.Tracer.GetTestingOutputBuffer())
+		block := ParseFirehoseBlock(t, "shared tracer", tester.tracer.GetTestingOutputBuffer())
 		trx := block.TransactionTraces[0]
 
 		// Verify transaction type
@@ -229,7 +229,7 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 		// Scenario: Non-blob transaction should not have blob gas fields
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
-			StartRootCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
 			EndCall([]byte{}, 95000).
 			EndBlockTrx(successReceipt(100000), nil, nil).
 			Validate(func(block *pbeth.Block) {

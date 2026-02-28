@@ -416,6 +416,14 @@ func (v *nativeValidator) OnSystemCallEnd() {
 	v.tracer.OnSystemCallEnd()
 }
 
+func (v *nativeValidator) OnClose() {
+	if v == nil {
+		return
+	}
+
+	v.tracer.OnClose()
+}
+
 // convertToNativeTransaction converts our TxEvent to go-ethereum's types.Transaction
 func convertToNativeTransaction(event TxEvent) *types.Transaction {
 	var to *common.Address
@@ -745,6 +753,11 @@ func (t *Tracer) SetTestingNativeValidator(nv interface{}) {
 // GetNativeTracerBuffer returns the native tracer's internal buffer for testing purposes
 func (t *Tracer) GetNativeTracerBuffer() *bytes.Buffer {
 	return t.nativeValidator.tracer.InternalTestingBuffer()
+}
+
+// GetTestingCurrentBlock returns the current block for testing purposes
+func (t *Tracer) GetTestingCurrentBlock() *pbeth.Block {
+	return t.block
 }
 
 // NewTestingNativeValidator creates a new native validator for testing
