@@ -162,6 +162,10 @@ type TracerTester struct {
 	// Current call depth (0 = root call, 1 = first nested call, etc.)
 	// Automatically managed by StartCall*/EndCall methods
 	depth int
+
+	// Block-wide log index counter (0-based)
+	// Automatically incremented by Log() and used to populate BlockIndex in receipt LogData
+	blockLogIndex uint32
 }
 
 // NewTracerTester creates a new tester builder with native validator
@@ -233,12 +237,14 @@ func (s *TracerTester) SetMockStateExist(addr [20]byte, exists bool) *TracerTest
 
 func (s *TracerTester) StartBlock() *TracerTester {
 	s.tracer.OnBlockStart(TestBlock)
+	s.blockLogIndex = 0 // Reset log counter for new block
 	return s
 }
 
 // StartBlockTrx starts a block and a transaction
 func (s *TracerTester) StartBlockTrx(tx firehose.TxEvent) *TracerTester {
 	s.tracer.OnBlockStart(TestBlock)
+	s.blockLogIndex = 0 // Reset log counter for new block
 	s.tracer.OnTxStart(tx, s.mockStateDB)
 	return s
 }
@@ -358,8 +364,11 @@ func (s *TracerTester) GasChange(oldGas, newGas uint64, reason pbeth.GasChange_R
 }
 
 // Log records a log event
+// The blockIndex parameter is used for OnLog (call logs), while s.blockLogIndex
+// tracks the index for receipt logs (auto-populated in EndBlockTrx/EndTrx)
 func (s *TracerTester) Log(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) *TracerTester {
 	s.tracer.OnLog(addr, topics, data, blockIndex)
+	s.blockLogIndex++ // Increment for next log
 	return s
 }
 
@@ -477,15 +486,30 @@ func (s *TracerTester) SystemCall(from, to [20]byte, input []byte, gas uint64, o
 // EndTrx ends the current transaction without ending the block
 // Use this when you have multiple transactions in the same block
 func (s *TracerTester) EndTrx(receipt *firehose.ReceiptData, txErr error) *TracerTester {
+	s.populateReceiptLogBlockIndex(receipt)
 	s.tracer.OnTxEnd(receipt, txErr)
 	return s
 }
 
 // EndBlockTrx ends the transaction and block with an optional error
 func (s *TracerTester) EndBlockTrx(receipt *firehose.ReceiptData, txErr, blockErr error) *TracerTester {
+	s.populateReceiptLogBlockIndex(receipt)
 	s.tracer.OnTxEnd(receipt, txErr)
 	s.tracer.OnBlockEnd(blockErr)
 	return s
+}
+
+// populateReceiptLogBlockIndex automatically populates BlockIndex in receipt LogData
+// This matches go-ethereum behavior where BlockIndex is prepopulated in receipt logs
+func (s *TracerTester) populateReceiptLogBlockIndex(receipt *firehose.ReceiptData) {
+	if receipt == nil {
+		return
+	}
+
+	// Populate BlockIndex in receipt logs (0-based, matching the order logs were added)
+	for i := range receipt.Logs {
+		receipt.Logs[i].BlockIndex = uint32(i)
+	}
 }
 
 func (s *TracerTester) EndBlock(err error) *TracerTester {
@@ -567,6 +591,25 @@ func (s *TracerTester) Validate(validateFunc func(block *pbeth.Block)) {
 		require.EqualExportedValues(s.t, nativeBlock, block)
 	}
 
+	validateFunc(block)
+}
+
+// ValidateWithCustomBlock validates using a custom BlockEvent instead of TestBlock
+// This is useful for testing specific block header fields that aren't in TestBlock
+// NOTE: This method bypasses native validator comparison since custom blocks may not
+// be compatible with native tracer validation
+//
+// Usage: Don't call StartBlock() before this - it handles the block lifecycle itself
+func (s *TracerTester) ValidateWithCustomBlock(blockEvent firehose.BlockEvent, validateFunc func(block *pbeth.Block)) {
+	// Start block with custom event
+	s.tracer.OnBlockStart(blockEvent)
+	s.blockLogIndex = 0 // Reset log counter for new block
+
+	// End the block
+	s.tracer.OnBlockEnd(nil)
+
+	// Parse and validate
+	block := ParseFirehoseBlock(s.t, "shared tracer", s.tracer.GetTestingOutputBuffer())
 	validateFunc(block)
 }
 

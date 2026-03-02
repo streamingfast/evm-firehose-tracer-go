@@ -106,6 +106,9 @@ type TxEventBuilder struct {
 	gasPrice              *big.Int
 	nonce                 uint64
 	data                  []byte
+	v                     []byte
+	r                     [32]byte
+	s                     [32]byte
 	maxFeePerGas          *big.Int
 	maxPriorityFeePerGas  *big.Int
 	accessList            AccessList
@@ -215,6 +218,24 @@ func (t *TxEventBuilder) SetCodeAuthorizations(authList []SetCodeAuthorization) 
 	return t
 }
 
+// V sets the signature V value
+func (t *TxEventBuilder) V(v []byte) *TxEventBuilder {
+	t.v = v
+	return t
+}
+
+// R sets the signature R point
+func (t *TxEventBuilder) R(r string) *TxEventBuilder {
+	t.r = hashFromHex(r)
+	return t
+}
+
+// S sets the signature S point
+func (t *TxEventBuilder) S(s string) *TxEventBuilder {
+	t.s = hashFromHex(s)
+	return t
+}
+
 // Defaults sets common default values for testing:
 // - Type: Legacy (0)
 // - Hash: Zero hash (usually computed by native validator)
@@ -268,6 +289,9 @@ func (t *TxEventBuilder) Build() TxEvent {
 		GasPrice:              t.gasPrice,
 		Nonce:                 t.nonce,
 		Input:                 t.data,
+		V:                     t.v,
+		R:                     t.r,
+		S:                     t.s,
 		MaxFeePerGas:          t.maxFeePerGas,
 		MaxPriorityFeePerGas:  t.maxPriorityFeePerGas,
 		AccessList:            t.accessList,

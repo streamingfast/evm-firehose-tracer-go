@@ -16,6 +16,7 @@ import (
 	"time"
 
 	eth "github.com/streamingfast/eth-go"
+	"github.com/streamingfast/eth-go/rlp"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"golang.org/x/crypto/sha3"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -410,6 +411,9 @@ func (t *Tracer) OnBlockEnd(err error) {
 			t.reorderIsolatedTransactionsAndOrdinals()
 		}
 
+		// Validate state: Must be in block and not in transaction
+		t.ensureInBlockAndNotInTrx()
+
 		// Flush block to firehose
 		if t.concurrentFlushQueue != nil {
 			t.concurrentFlushQueue.Push(t.block)
@@ -419,6 +423,10 @@ func (t *Tracer) OnBlockEnd(err error) {
 				t.flushToFirehose(bytes)
 			}
 		}
+	} else {
+		// An error occurred, could have happened in transaction/call context
+		// We must not check if in trx/call, only check in block
+		t.ensureInBlock(0)
 	}
 
 	t.resetBlock()
@@ -429,6 +437,37 @@ func (t *Tracer) OnBlockEnd(err error) {
 
 // OnSkippedBlock is called for blocks that are skipped
 func (t *Tracer) OnSkippedBlock(event BlockEvent) {
+	// IMPORTANT: Chain implementations MUST ensure skipped blocks have 0 transactions
+	// before calling this method. The native tracer validates this:
+	//   if event.Block.Transactions().Len() > 0 { panic(...) }
+	//
+	// Since the shared tracer is chain-agnostic and BlockData doesn't include
+	// the transactions list, this validation must be performed by the chain-specific
+	// code that calls OnSkippedBlock.
+	//
+	// See: https://github.com/streamingfast/go-ethereum/blob/a46903cf0cad829479ded66b369017914bf82314/core/blockchain.go#L1797-L1814
+
+	// Call native validator and then disable it temporarily to prevent duplicate processing
+	// OnSkippedBlock is a high-level method that calls other hooks (OnBlockStart, OnBlockEnd)
+	// We want the native validator to process OnSkippedBlock once, but not duplicate processing
+	// through each individual hook call
+	if t.nativeValidator != nil {
+		t.nativeValidator.OnSkippedBlock(event)
+
+		// Temporarily disable native validator to prevent duplicate processing
+		// Restore it when the function exits
+		previousValidator := t.nativeValidator
+		defer func() {
+			t.nativeValidator = previousValidator
+		}()
+		t.nativeValidator = nil
+	}
+
+	// Validate we're not in a transaction (skipped blocks should never have transactions)
+	if t.transaction != nil {
+		t.panicInvalidState(fmt.Sprintf("OnSkippedBlock called while in transaction state - skipped blocks must have 0 transactions"), 2)
+	}
+
 	// Trace the block as normal, the Firehose system will discard it if needed
 	t.OnBlockStart(event)
 	t.OnBlockEnd(nil)
@@ -478,6 +517,34 @@ func (t *Tracer) newBlockHeaderFromBlockData(block BlockData) *pbeth.BlockHeader
 	// This matches the native tracer's behavior in firehose.go:2089-2091
 	if header.Difficulty == nil {
 		header.Difficulty = &pbeth.BigInt{Bytes: []byte{0}}
+	}
+
+	// EIP-4895: Shanghai withdrawals root
+	if block.WithdrawalsRoot != nil {
+		header.WithdrawalsRoot = (*block.WithdrawalsRoot)[:]
+	}
+
+	// EIP-4844: Cancun blob gas tracking
+	if block.BlobGasUsed != nil {
+		header.BlobGasUsed = block.BlobGasUsed
+	}
+	if block.ExcessBlobGas != nil {
+		header.ExcessBlobGas = block.ExcessBlobGas
+	}
+
+	// EIP-4788: Cancun parent beacon root
+	if block.ParentBeaconRoot != nil {
+		header.ParentBeaconRoot = (*block.ParentBeaconRoot)[:]
+	}
+
+	// EIP-7685: Prague execution requests hash
+	if block.RequestsHash != nil {
+		header.RequestsHash = (*block.RequestsHash)[:]
+	}
+
+	// Polygon-specific: Transaction dependency metadata
+	if block.TxDependency != nil {
+		header.TxDependency = pbeth.NewUint64NestedArray(block.TxDependency)
 	}
 
 	return header
@@ -540,6 +607,9 @@ func (t *Tracer) OnTxStart(event TxEvent, stateReader StateReader) {
 
 	firehoseInfo("trx start (hash=%x type=%d gas=%d isolated=%t)", event.Hash, event.Type, event.Gas, t.transactionIsolated)
 
+	// Validate state: Must be in block, not in transaction, not in call
+	t.ensureInBlockAndNotInTrxAndNotInCall()
+
 	// Store state reader for this transaction
 	t.transactionStateReader = stateReader
 
@@ -556,12 +626,23 @@ func (t *Tracer) OnTxStart(event TxEvent, stateReader StateReader) {
 		GasPrice:     bigIntToProtobuf(effectiveGasPrice),
 		Value:        bigIntToProtobuf(event.Value),
 		Input:        event.Input,
+		V:            event.V,
+		R:            normalizeSignaturePoint(event.R[:]),
+		S:            normalizeSignaturePoint(event.S[:]),
 		Type:         pbeth.TransactionTrace_Type(event.Type),
 	}
 
-	// Set To address (nil for contract creation)
+	// Set To address
+	// For contract creation (event.To == nil), compute the contract address
+	// using CREATE address derivation: keccak256(rlp([sender, nonce]))[12:]
 	if event.To != nil {
 		trx.To = event.To[:]
+	} else {
+		// Contract creation - compute address from sender and nonce
+		// Get the sender's nonce at transaction start from the state reader
+		senderNonce := stateReader.GetNonce(event.From)
+		contractAddr := CreateAddress(event.From, senderNonce)
+		trx.To = contractAddr[:]
 	}
 
 	// Set EIP-1559 fields (type 2, 3, 4)
@@ -703,6 +784,9 @@ func (t *Tracer) OnTxEnd(receipt *ReceiptData, err error) {
 
 	firehoseInfo("trx ending (isolated=%t, err=%v)", t.transactionIsolated, err)
 
+	// Validate state: Must be in block and in transaction
+	t.ensureInBlockAndInTrx()
+
 	trxTrace := t.completeTransaction(receipt, err)
 
 	// In isolated mode, store in transient storage for later merge
@@ -735,7 +819,13 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	// Get root call
 	rootCall := t.transaction.Calls[0]
 
-	// Move any remaining deferred state to root call FIRST
+	// Discard SetCode authorizations that don't have corresponding nonce changes
+	// (matching native tracer's discardUncommittedSetCodeAuthorization)
+	// This MUST happen BEFORE deferred state is populated, since we need to check
+	// the initial deferred state that was already transferred into the root call
+	t.discardUncommittedSetCodeAuthorizations(rootCall)
+
+	// Move any remaining deferred state to root call
 	// (this includes state changes that occur after the root call ends)
 	if !t.deferredCallState.IsEmpty() {
 		if err := t.deferredCallState.MaybePopulateCallAndReset("root", rootCall); err != nil {
@@ -743,20 +833,8 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 		}
 	}
 
-	// Discard SetCode authorizations that don't have corresponding nonce changes
-	// (matching native tracer's discardUncommittedSetCodeAuthorization)
-	// This MUST happen after deferred state is populated, since EIP-7702 nonce changes
-	// occur before the root call starts
-	t.discardUncommittedSetCodeAuthorizations(rootCall)
-
-	// Copy root call's return data to transaction (matching native tracer line 852)
-	// This is the return value from the top-level contract call
-	t.transaction.ReturnData = rootCall.ReturnData
-
-	// Populate state reverted flags (MUST happen before log processing)
-	t.populateStateReverted()
-
-	// Populate receipt data
+	// Populate receipt data BEFORE populateStateReverted
+	// (matching native tracer order - receipt population before state reverted)
 	if receipt != nil {
 		t.transaction.Index = receipt.TransactionIndex
 		t.transaction.GasUsed = receipt.GasUsed
@@ -773,6 +851,13 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	if rootCall.StatusReverted {
 		t.transaction.Status = pbeth.TransactionTraceStatus_REVERTED
 	}
+
+	// Copy root call's return data to transaction (matching native tracer line 852)
+	// This is the return value from the top-level contract call
+	t.transaction.ReturnData = rootCall.ReturnData
+
+	// Populate state reverted flags (MUST happen AFTER receipt population)
+	t.populateStateReverted()
 
 	// Remove BlockIndex from logs in reverted calls
 	// (matching native tracer's removeLogBlockIndexOnStateRevertedCalls)
@@ -806,8 +891,9 @@ func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionRece
 	// Add logs
 	for _, log := range receipt.Logs {
 		pbLog := &pbeth.Log{
-			Address: log.Address[:],
-			Data:    log.Data,
+			Address:    log.Address[:],
+			Data:       log.Data,
+			BlockIndex: log.BlockIndex, // Use BlockIndex from receipt data (prepopulated by chain implementation)
 		}
 		for _, topic := range log.Topics {
 			pbLog.Topics = append(pbLog.Topics, topic[:])
@@ -864,10 +950,24 @@ func (t *Tracer) assignOrdinalAndIndexToReceiptLogs() {
 	}
 
 	// Copy ordinal and index from call logs to receipt logs
+	// Match native tracer behavior: Only assign Ordinal and Index, NOT BlockIndex
+	// BlockIndex is prepopulated in receipt logs by the chain implementation (like go-ethereum does)
+	// Validate that BlockIndex matches between call logs and receipt logs
 	for i := 0; i < len(callLogs); i++ {
-		receiptLogs[i].Ordinal = callLogs[i].Ordinal
-		receiptLogs[i].Index = callLogs[i].Index
-		receiptLogs[i].BlockIndex = callLogs[i].BlockIndex
+		callLog := callLogs[i]
+		receiptLog := receiptLogs[i]
+
+		// Validate BlockIndex matches (like native tracer does)
+		if callLog.BlockIndex != receiptLog.BlockIndex {
+			t.panicInvalidState(fmt.Sprintf(
+				"mismatch between call log and receipt log BlockIndex at index %d: call log has %d but receipt log has %d",
+				i, callLog.BlockIndex, receiptLog.BlockIndex,
+			), 2)
+		}
+
+		// Assign ordinal and index (matching native tracer behavior)
+		receiptLog.Ordinal = callLog.Ordinal
+		receiptLog.Index = callLog.Index
 	}
 }
 
@@ -972,9 +1072,16 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 		Value:        bigIntToProtobuf(value), // Use bigIntToProtobuf to handle nil values
 		GasLimit:     gas,
 		GasConsumed:  0,
-		Input:        input,
+		Input:        bytes.Clone(input), // Clone to prevent data races if input is mutated later
 		BeginOrdinal: t.blockOrdinal.Next(),
 		// ExecutedCode is set in OnOpcode (matches native tracer behavior)
+	}
+
+	// Validate call type (matching native tracer validation)
+	// Only valid call types should reach here: CALL, CALLCODE, DELEGATECALL, STATICCALL, CREATE, CREATE2
+	// SELFDESTRUCT is already handled above and returns early
+	if call.CallType == pbeth.CallType_UNSPECIFIED {
+		t.panicInvalidState(fmt.Sprintf("unexpected call type UNSPECIFIED (opcode=%d), only call-related opcodes (CALL, CREATE, CREATE2, STATIC, DELEGATECALL, CALLCODE) are accepted", typ), 2)
 	}
 
 	// Handle DELEGATECALL code address
@@ -1275,6 +1382,18 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 // OnGasChange is called when gas is consumed
 // Note: reason is pbeth.GasChange_Reason - the chain implementation converts from go-ethereum types
 func (t *Tracer) OnGasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) {
+	// IMPORTANT: Chain implementations MUST filter certain gas change reasons before calling this method.
+	//
+	// The native tracer explicitly filters:
+	//   - GasChangeCallOpCode: Gas changes due to call opcodes (handled separately in OnCallEnter/Exit)
+	//   - GasChangeIgnored: Gas changes that should not be recorded
+	//
+	// Chain implementations should convert these filtered reasons to REASON_UNKNOWN or simply
+	// not call OnGasChange for them. This creates an implicit coupling but maintains compatibility
+	// with the native tracer's behavior.
+	//
+	// See native tracer: go-ethereum/eth/tracers/firehose.go OnGasChange for filtering logic
+
 	if t.nativeValidator != nil {
 		t.nativeValidator.OnGasChange(oldGas, newGas, reason)
 	}
@@ -1287,6 +1406,7 @@ func (t *Tracer) OnGasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reaso
 	}
 
 	// Ignore UNKNOWN reasons (filtered by caller in chain implementation)
+	// Chain implementations must convert GasChangeCallOpCode and GasChangeIgnored to REASON_UNKNOWN
 	if reason == pbeth.GasChange_REASON_UNKNOWN {
 		return
 	}
@@ -1667,4 +1787,48 @@ func parseDelegation(code []byte) ([20]byte, bool) {
 	var addr [20]byte
 	copy(addr[:], code[len(delegationPrefix):])
 	return addr, true
+}
+
+// normalizeSignaturePoint normalizes a signature point (R or S) to match native tracer behavior:
+// - Returns nil if the value is all zeros (empty/unsigned transaction)
+// - Otherwise returns the value as-is (already 32 bytes from [32]byte conversion)
+//
+// This matches the native tracer's normalizeSignaturePoint which returns nil for zero big.Int values
+// whose Bytes() method returns an empty slice.
+func normalizeSignaturePoint(value []byte) []byte {
+	// Check if all bytes are zero
+	for _, b := range value {
+		if b != 0 {
+			return value
+		}
+	}
+	// All zeros - return nil to match native tracer behavior
+	return nil
+}
+
+// CreateAddress computes the Ethereum address for a contract created using CREATE opcode.
+// The address is derived as: keccak256(rlp([sender, nonce]))[12:]
+//
+// This matches go-ethereum's crypto.CreateAddress function behavior.
+func CreateAddress(sender [20]byte, nonce uint64) [20]byte {
+	// RLP encode [sender, nonce]
+	// Using slice of interfaces for the RLP encoder
+	data := []interface{}{
+		sender[:],
+		nonce,
+	}
+
+	rlpEncoded, err := rlp.Encode(data)
+	if err != nil {
+		// RLP encoding of address and nonce should never fail
+		panic(fmt.Sprintf("failed to RLP encode CREATE address data: %v", err))
+	}
+
+	// Compute keccak256 hash
+	hash := eth.Keccak256(rlpEncoded)
+
+	// Extract last 20 bytes as the contract address
+	var addr [20]byte
+	copy(addr[:], hash[12:])
+	return addr
 }

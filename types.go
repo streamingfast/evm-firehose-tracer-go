@@ -41,6 +41,24 @@ type BlockData struct {
 	Size        uint64
 	Withdrawals []WithdrawalData
 	IsMerge     bool
+
+	// EIP-4895: Shanghai withdrawals
+	WithdrawalsRoot *[32]byte // Root hash of withdrawals tree (nil for pre-Shanghai blocks)
+
+	// EIP-4844: Cancun blob gas tracking
+	BlobGasUsed   *uint64 // Total blob gas consumed by blob transactions (nil for pre-Cancun blocks)
+	ExcessBlobGas *uint64 // Running total of excess blob gas (nil for pre-Cancun blocks)
+
+	// EIP-4788: Cancun beacon block root
+	ParentBeaconRoot *[32]byte // Parent beacon block root for CL/EL sync (nil for pre-Cancun blocks)
+
+	// EIP-7685: Prague execution requests
+	RequestsHash *[32]byte // Root hash of execution layer requests (nil for pre-Prague blocks)
+
+	// Polygon-specific: Transaction dependency metadata
+	// List of transaction indexes that are dependent on each other in the block
+	// Used by Polygon's parallel execution engine (nil for non-Polygon chains)
+	TxDependency [][]uint64
 }
 
 // UncleData contains uncle block header data
@@ -100,6 +118,11 @@ type TxEvent struct {
 	Nonce    uint64
 	Index    uint32
 
+	// Signature fields
+	V []byte    // Signature V value (can be nil for unsigned transactions)
+	R [32]byte  // Signature R point
+	S [32]byte  // Signature S point
+
 	// EIP-1559 fields (type 2)
 	MaxFeePerGas         *big.Int
 	MaxPriorityFeePerGas *big.Int
@@ -148,9 +171,10 @@ type ReceiptData struct {
 
 // LogData contains log event data
 type LogData struct {
-	Address [20]byte
-	Topics  [][32]byte
-	Data    []byte
+	Address    [20]byte
+	Topics     [][32]byte
+	Data       []byte
+	BlockIndex uint32 // Block-wide index of the log (prepopulated by chain implementation, matches go-ethereum behavior)
 }
 
 // CallFrame contains the data for OnCallEnter/OnCallExit

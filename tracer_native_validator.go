@@ -424,6 +424,15 @@ func (v *nativeValidator) OnClose() {
 	v.tracer.OnClose()
 }
 
+func (v *nativeValidator) OnSkippedBlock(event BlockEvent) {
+	if v == nil {
+		return
+	}
+
+	nativeEvent := convertToNativeBlockEvent(event)
+	v.tracer.OnSkippedBlock(nativeEvent)
+}
+
 // convertToNativeTransaction converts our TxEvent to go-ethereum's types.Transaction
 func convertToNativeTransaction(event TxEvent) *types.Transaction {
 	var to *common.Address
@@ -431,6 +440,15 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 		addr := common.Address(*event.To)
 		to = &addr
 	}
+
+	// Convert signature values V, R, S from TxEvent
+	// V is []byte (can be nil), R and S are [32]byte
+	v := new(big.Int)
+	if len(event.V) > 0 {
+		v.SetBytes(event.V)
+	}
+	r := new(big.Int).SetBytes(event.R[:])
+	s := new(big.Int).SetBytes(event.S[:])
 
 	// Convert based on transaction type
 	switch event.Type {
@@ -442,9 +460,9 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 			To:       to,
 			Value:    event.Value,
 			Data:     event.Input,
-			V:        new(big.Int),
-			R:        new(big.Int),
-			S:        new(big.Int),
+			V:        v,
+			R:        r,
+			S:        s,
 		}
 		return types.NewTx(legacyTx)
 
@@ -458,9 +476,9 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 			Value:      event.Value,
 			Data:       event.Input,
 			AccessList: convertToNativeAccessList(event.AccessList),
-			V:          new(big.Int),
-			R:          new(big.Int),
-			S:          new(big.Int),
+			V:          v,
+			R:          r,
+			S:          s,
 		}
 		return types.NewTx(accessListTx)
 
@@ -475,9 +493,9 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 			Value:      event.Value,
 			Data:       event.Input,
 			AccessList: convertToNativeAccessList(event.AccessList),
-			V:          new(big.Int),
-			R:          new(big.Int),
-			S:          new(big.Int),
+			V:          v,
+			R:          r,
+			S:          s,
 		}
 		return types.NewTx(dynamicFeeTx)
 
@@ -494,9 +512,9 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 			AccessList: convertToNativeAccessList(event.AccessList),
 			BlobFeeCap: bigToUint256(event.BlobGasFeeCap),
 			BlobHashes: convertToBlobHashes(event.BlobHashes),
-			V:          uint256.NewInt(0),
-			R:          uint256.NewInt(0),
-			S:          uint256.NewInt(0),
+			V:          uint256.MustFromBig(v),
+			R:          uint256.MustFromBig(r),
+			S:          uint256.MustFromBig(s),
 		}
 		return types.NewTx(blobTx)
 
@@ -512,9 +530,9 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 			Data:       event.Input,
 			AccessList: convertToNativeAccessList(event.AccessList),
 			AuthList:   convertToNativeAuthList(event.SetCodeAuthorizations),
-			V:          uint256.NewInt(0),
-			R:          uint256.NewInt(0),
-			S:          uint256.NewInt(0),
+			V:          uint256.MustFromBig(v),
+			R:          uint256.MustFromBig(r),
+			S:          uint256.MustFromBig(s),
 		}
 		return types.NewTx(setCodeTx)
 
@@ -527,9 +545,9 @@ func convertToNativeTransaction(event TxEvent) *types.Transaction {
 			To:       to,
 			Value:    event.Value,
 			Data:     event.Input,
-			V:        new(big.Int),
-			R:        new(big.Int),
-			S:        new(big.Int),
+			V:        v,
+			R:        r,
+			S:        s,
 		}
 		return types.NewTx(legacyTx)
 	}
