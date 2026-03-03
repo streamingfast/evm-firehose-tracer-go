@@ -613,6 +613,93 @@ func (s *TracerTester) ValidateWithCustomBlock(blockEvent firehose.BlockEvent, v
 	validateFunc(block)
 }
 
+// ============================================================================
+// Parallel Execution Helpers
+// ============================================================================
+
+// Spawn creates an isolated tracer for parallel transaction execution.
+//
+// This method MUST be called on a coordinator TracerTester (after StartBlock).
+// It returns a new TracerTester wrapping an isolated tracer that can execute
+// transactions in parallel.
+//
+// Example:
+//
+//	coordinator := NewTracerTester(t)
+//	coordinator.StartBlock()
+//
+//	isolated0 := coordinator.Spawn(0)
+//	isolated1 := coordinator.Spawn(1)
+//
+//	// Execute in parallel goroutines
+//	go func() {
+//	    isolated0.StartTrx(tx0).
+//	        StartCall(...).EndCall(...).
+//	        EndTrx(receipt0, nil)
+//	}()
+//
+//	// Commit in order
+//	coordinator.Commit(isolated0)
+//	coordinator.Commit(isolated1)
+func (s *TracerTester) Spawn(txIndex int) *TracerTester {
+	isolatedTracer := s.tracer.OnTxSpawn(txIndex)
+
+	return &TracerTester{
+		t:           s.t,
+		tracer:      isolatedTracer,
+		mockStateDB: s.mockStateDB, // Share mockStateDB with coordinator
+		depth:       0,
+		// Note: blockLogIndex is NOT shared - each isolated tracer has its own
+		blockLogIndex: 0,
+	}
+}
+
+// Commit commits an isolated tracer's transaction to the coordinator.
+//
+// This method MUST be called on the coordinator TracerTester with an isolated
+// TracerTester as the parameter.
+//
+// Example:
+//
+//	isolated := coordinator.Spawn(0)
+//	// ... execute transaction in isolated ...
+//	coordinator.Commit(isolated)
+func (s *TracerTester) Commit(isolated *TracerTester) *TracerTester {
+	err := s.tracer.OnTxCommit(isolated.tracer)
+	require.NoError(s.t, err, "OnTxCommit should succeed")
+	return s
+}
+
+// CommitWithError commits an isolated tracer and returns the error (if any).
+//
+// This is useful for testing error cases where commit should fail.
+//
+// Example:
+//
+//	err := coordinator.CommitWithError(isolated)
+//	assert.Error(t, err)
+func (s *TracerTester) CommitWithError(isolated *TracerTester) error {
+	return s.tracer.OnTxCommit(isolated.tracer)
+}
+
+// Reset resets an isolated tracer for retry.
+//
+// This method MUST be called on an isolated TracerTester.
+//
+// Example:
+//
+//	isolated := coordinator.Spawn(0)
+//	isolated.StartTrx(tx0)
+//	// ... execution fails ...
+//	isolated.Reset()
+//	// ... can execute again ...
+func (s *TracerTester) Reset() *TracerTester {
+	s.tracer.OnTxReset()
+	s.depth = 0
+	s.blockLogIndex = 0
+	return s
+}
+
 // ParseFirehoseBlock parses a single block from FIRE BLOCK output format
 // This is a convenience wrapper around ParseFirehoseBlocks that returns the first block
 func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.Block {

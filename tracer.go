@@ -70,8 +70,17 @@ type Tracer struct {
 	transactionLogIndex    uint32
 	transactionStateReader StateReader // State reader for current transaction (from TxEvent)
 	inSystemCall           bool
-	transactionIsolated    bool                    // true = isolated mode, false = coordinator mode
-	transactionTransient   *pbeth.TransactionTrace // Only used in isolated mode
+
+	// Parallel execution / isolated tracer state
+	// These fields support parallel transaction execution:
+	// - transactionIsolated: true = isolated mode, false = coordinator mode
+	// - transactionTransient: holds completed transaction until OnTxCommit (isolated mode only)
+	// - commitMutex: serializes concurrent OnTxCommit calls (coordinator mode only)
+	// - coordinator: reference to coordinator tracer (isolated mode only)
+	transactionIsolated  bool                    // true = isolated mode, false = coordinator mode
+	transactionTransient *pbeth.TransactionTrace // Completed transaction awaiting commit (isolated mode only)
+	commitMutex          sync.Mutex              // Serializes OnTxCommit calls (coordinator mode only)
+	coordinator          *Tracer                 // Reference to coordinator tracer (isolated mode only)
 
 	// Call state
 	callStack                    *CallStack
@@ -799,6 +808,207 @@ func (t *Tracer) OnTxEnd(receipt *ReceiptData, err error) {
 	}
 
 	firehoseInfo("trx end")
+}
+
+// ============================================================================
+// Parallel Execution Hooks
+// ============================================================================
+
+// OnTxSpawn creates a new isolated tracer for parallel transaction execution.
+//
+// This method MUST be called on the coordinator tracer (transactionIsolated = false).
+// It returns a new isolated tracer that shares block-level state but has its own
+// transaction/call state for concurrent execution.
+//
+// The isolated tracer will:
+//   - Share read-only block state (block, chainConfig, blockBaseFee, etc.)
+//   - Have its own transaction state (transaction, callStack, etc.)
+//   - Use local ordinals starting from 0 (reordered on commit via OnTxCommit)
+//   - Set transactionIsolated = true
+//
+// Example usage:
+//
+//	coordinator := NewTracer(config)
+//	coordinator.OnBlockStart(blockEvent)
+//
+//	// Spawn isolated tracers for parallel execution
+//	isolated0 := coordinator.OnTxSpawn(0)
+//	isolated1 := coordinator.OnTxSpawn(1)
+//
+//	// Execute in parallel goroutines
+//	go func() {
+//	    isolated0.OnTxStart(tx0, stateReader)
+//	    // ... trace transaction 0 ...
+//	    isolated0.OnTxEnd(receipt0, nil)
+//	}()
+//
+//	// Commit in original order
+//	coordinator.OnTxCommit(isolated0)
+//	coordinator.OnTxCommit(isolated1)
+func (t *Tracer) OnTxSpawn(txIndex int) *Tracer {
+	// Validate called on coordinator
+	if t.transactionIsolated {
+		t.panicInvalidState("OnTxSpawn must be called on coordinator tracer, not isolated tracer", 2)
+	}
+
+	t.ensureInBlock(0)
+
+	firehoseInfo("spawning isolated tracer (tx_index=%d)", txIndex)
+
+	// Create isolated tracer sharing block state
+	isolated := &Tracer{
+		// Shared global state (read-only from isolated tracer perspective)
+		config:      t.config,
+		chainConfig: t.chainConfig,
+		initSent:    t.initSent,
+		hasher:      sha3.NewLegacyKeccak256(),
+		tracerID:    fmt.Sprintf("isolated-%d", txIndex),
+
+		// Shared block state (read-only from isolated tracer perspective)
+		block:         t.block, // SHARED: reference to same block
+		blockBaseFee:  t.blockBaseFee,
+		blockFinality: t.blockFinality,
+		blockRules:    t.blockRules,
+
+		// Isolated state (unique per isolated tracer)
+		blockOrdinal:        &Ordinal{}, // Fresh ordinal counter (starts at 0)
+		transactionLogIndex: 0,
+		transactionIsolated: true, // ISOLATED MODE
+
+		// Fresh transaction/call state
+		callStack:         NewCallStack(),
+		deferredCallState: NewDeferredCallState(),
+
+		// Link back to coordinator
+		coordinator: t,
+	}
+
+	firehoseInfo("spawned isolated tracer (tracer=%s)", isolated.tracerID)
+
+	return isolated
+}
+
+// OnTxReset resets the isolated tracer's transaction and transient state.
+//
+// This method should be called on an isolated tracer when the execution engine
+// needs to retry a transaction. It clears all transaction-specific state while
+// preserving the shared block context.
+//
+// After calling OnTxReset, the isolated tracer can execute a new transaction
+// via OnTxStart.
+//
+// This method MUST be called on an isolated tracer (transactionIsolated = true).
+//
+// Example usage:
+//
+//	isolated := coordinator.OnTxSpawn(0)
+//	isolated.OnTxStart(tx0, stateReader)
+//	// ... execution fails, need to retry ...
+//	isolated.OnTxReset()
+//	// Now can call OnTxStart again
+//	isolated.OnTxStart(tx0Retry, stateReader)
+func (t *Tracer) OnTxReset() {
+	// Validate called on isolated tracer
+	if !t.transactionIsolated {
+		t.panicInvalidState("OnTxReset must be called on isolated tracer, not coordinator", 2)
+	}
+
+	firehoseDebug("resetting isolated tracer (tracer=%s)", t.tracerID)
+
+	// Reset transaction state
+	t.transaction = nil
+	t.transactionStateReader = nil
+	t.transactionLogIndex = 0
+
+	// Reset transient state
+	t.transactionTransient = nil
+
+	// Reset call state
+	t.callStack.Reset()
+	t.deferredCallState.Reset()
+	t.latestCallEnterSuicided = false
+	t.latestCallEnterSuicidedDepth = 0
+
+	// Reset ordinal counter (back to 0)
+	t.blockOrdinal.Reset()
+
+	firehoseDebug("reset complete (tracer=%s)", t.tracerID)
+}
+
+// OnTxCommit commits an isolated tracer's transaction to the coordinator.
+//
+// This method MUST be called on the coordinator tracer (transactionIsolated = false)
+// with an isolated tracer as the parameter.
+//
+// The method:
+//  1. Validates the isolated tracer has a completed transaction (transactionTransient != nil)
+//  2. Reorders all ordinals in the transaction relative to coordinator's current ordinal
+//  3. Appends the transaction to the coordinator's block
+//  4. Updates the coordinator's ordinal counter
+//  5. Clears the isolated tracer's transient state
+//
+// This method is THREAD-SAFE and can be called concurrently from multiple goroutines.
+// Commits are serialized internally using a mutex to ensure correct ordinal ordering.
+//
+// IMPORTANT: Commits should generally happen in the original transaction order to
+// maintain block validity, even though the executions happened in parallel.
+//
+// Example usage:
+//
+//	// Execute transactions in parallel
+//	var wg sync.WaitGroup
+//	wg.Add(3)
+//	go func() { defer wg.Done(); executeTransaction(isolated0) }()
+//	go func() { defer wg.Done(); executeTransaction(isolated1) }()
+//	go func() { defer wg.Done(); executeTransaction(isolated2) }()
+//	wg.Wait()
+//
+//	// Commit in original order (0, 1, 2)
+//	coordinator.OnTxCommit(isolated0) // ordinals 0-100
+//	coordinator.OnTxCommit(isolated1) // ordinals 101-200
+//	coordinator.OnTxCommit(isolated2) // ordinals 201-300
+func (t *Tracer) OnTxCommit(isolatedTracer *Tracer) error {
+	// Validate called on coordinator
+	if t.transactionIsolated {
+		return fmt.Errorf("OnTxCommit must be called on coordinator tracer, not isolated tracer")
+	}
+
+	// Validate parameter is isolated tracer
+	if !isolatedTracer.transactionIsolated {
+		return fmt.Errorf("OnTxCommit parameter must be an isolated tracer")
+	}
+
+	// Validate isolated tracer has completed transaction
+	if isolatedTracer.transactionTransient == nil {
+		return fmt.Errorf("isolated tracer has no transaction to commit (call OnTxEnd first)")
+	}
+
+	firehoseInfo("committing isolated transaction (coordinator=%s, isolated=%s)",
+		t.tracerID, isolatedTracer.tracerID)
+
+	// Serialize commits to ensure correct ordinal ordering
+	t.commitMutex.Lock()
+	defer t.commitMutex.Unlock()
+
+	// Get base ordinal from coordinator
+	baseOrdinal := t.blockOrdinal.Peek()
+
+	// Reorder all ordinals in the isolated transaction
+	endOrdinal := t.reorderTransactionOrdinals(isolatedTracer.transactionTransient, baseOrdinal)
+
+	// Append to coordinator's block
+	t.block.TransactionTraces = append(t.block.TransactionTraces, isolatedTracer.transactionTransient)
+
+	// Update coordinator's ordinal counter
+	t.blockOrdinal.Set(endOrdinal)
+
+	// Clear isolated tracer's transient state
+	isolatedTracer.transactionTransient = nil
+
+	firehoseInfo("commit complete (coordinator=%s, new_ordinal=%d)",
+		t.tracerID, endOrdinal)
+
+	return nil
 }
 
 // completeTransaction finalizes a transaction trace with receipt data
@@ -1787,6 +1997,42 @@ func parseDelegation(code []byte) ([20]byte, bool) {
 	var addr [20]byte
 	copy(addr[:], code[len(delegationPrefix):])
 	return addr, true
+}
+
+// ============================================================================
+// Parallel Execution Helper Methods
+// ============================================================================
+
+// reorderTransactionOrdinals reorders all ordinals in a transaction trace.
+//
+// This is called during OnTxCommit to rebase the isolated tracer's local ordinals
+// (which start from 0) to the coordinator's current ordinal.
+//
+// Returns the final ordinal after all elements have been reordered.
+func (t *Tracer) reorderTransactionOrdinals(trx *pbeth.TransactionTrace, baseOrdinal uint64) uint64 {
+	firehoseTrace("reordering transaction ordinals (base=%d, begin=%d)", baseOrdinal, trx.BeginOrdinal)
+
+	// Reorder transaction-level ordinals
+	trx.BeginOrdinal += baseOrdinal
+
+	// Reorder all calls
+	for _, call := range trx.Calls {
+		t.reorderCallOrdinals(call, baseOrdinal)
+	}
+
+	// Reorder receipt logs
+	if trx.Receipt != nil {
+		for _, log := range trx.Receipt.Logs {
+			log.Ordinal += baseOrdinal
+		}
+	}
+
+	// Reorder end ordinal
+	trx.EndOrdinal += baseOrdinal
+
+	firehoseTrace("reordering complete (base=%d, end=%d)", baseOrdinal, trx.EndOrdinal)
+
+	return trx.EndOrdinal
 }
 
 // normalizeSignaturePoint normalizes a signature point (R or S) to match native tracer behavior:
