@@ -76,4 +76,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => ./go-ethereum
+replace github.com/ethereum/go-ethereum => github.com/streamingfast/go-ethereum v1.14.6-0.20260217182555-6cf2f05a5b11
