@@ -2,7 +2,6 @@ package tests
 
 import (
 	"bytes"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -104,8 +103,7 @@ func TestTracer_ConcurrentFlushing_LargeBuffer(t *testing.T) {
 // newConcurrentTracerTester creates a TracerTester with concurrent flushing enabled
 func newConcurrentTracerTester(t *testing.T, bufferSize int, outputBuffer *bytes.Buffer) *TracerTester {
 	chainConfig := &firehose.ChainConfig{
-		ChainID:             big.NewInt(1),
-		SetCodeAuthRecovery: EthereumSetCodeAuthRecovery,
+		ChainID: big.NewInt(1),
 	}
 
 	tester := &TracerTester{
@@ -118,11 +116,6 @@ func newConcurrentTracerTester(t *testing.T, bufferSize int, outputBuffer *bytes
 		}),
 		mockStateDB: newMockStateDB(),
 	}
-
-	var err error
-	nv, err := firehose.NewTestingNativeValidator(fmt.Sprintf(`"concurrentBlockFlushing": %d`, bufferSize))
-	require.NoError(t, err, "creating native validator")
-	tester.tracer.SetTestingNativeValidator(nv)
 
 	tester.tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
 

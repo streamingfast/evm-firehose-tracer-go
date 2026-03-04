@@ -67,11 +67,9 @@ func TestTracer_OnSkippedBlock(t *testing.T) {
 
 		// Parse all blocks from output
 		sharedBlocks := ParseFirehoseBlocks(t, "shared tracer", tester.tracer.GetTestingOutputBuffer())
-		nativeBlocks := ParseFirehoseBlocks(t, "native tracer", tester.tracer.GetNativeTracerBuffer())
 
 		// Should have 3 blocks
 		require.Len(t, sharedBlocks, 3, "Should have 3 blocks from shared tracer")
-		require.Len(t, nativeBlocks, 3, "Should have 3 blocks from native tracer")
 
 		// Validate each block
 		for i := 0; i < 3; i++ {
@@ -79,9 +77,6 @@ func TestTracer_OnSkippedBlock(t *testing.T) {
 
 			assert.Equal(t, expectedNumber, sharedBlocks[i].Number, "Block %d number should be %d", i, expectedNumber)
 			assert.Empty(t, sharedBlocks[i].TransactionTraces, "Block %d should have no transactions", i)
-
-			assert.Equal(t, expectedNumber, nativeBlocks[i].Number, "Native block %d number should be %d", i, expectedNumber)
-			assert.Empty(t, nativeBlocks[i].TransactionTraces, "Native block %d should have no transactions", i)
 		}
 	})
 }

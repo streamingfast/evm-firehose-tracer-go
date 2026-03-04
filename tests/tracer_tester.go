@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"math/big"
 	"strconv"
 	"strings"
@@ -11,9 +12,6 @@ import (
 
 	firehose "github.com/streamingfast/evm-firehose-tracer-go"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -28,15 +26,15 @@ var (
 	Miner   = "0x1eff47bc3a10a45d4b230b5d10e37751fe6aa718"
 )
 
-// Test error constants matching VM errors from go-ethereum
-// We use the actual VM errors so that both the native validator (which uses errors.Is)
-// and the shared tracer (which uses errorIsString) can recognize them correctly
+// Test error constants matching VM errors text
+// The shared tracer uses errorIsString which matches on error text
+// These error messages match go-ethereum's VM errors exactly
 var (
-	testErrExecutionReverted           = vm.ErrExecutionReverted
-	testErrInsufficientBalanceTransfer = vm.ErrInsufficientBalance
-	testErrMaxCallDepth                = vm.ErrDepth
-	testErrOutOfGas                    = vm.ErrOutOfGas
-	testErrCodeStoreOutOfGas           = vm.ErrCodeStoreOutOfGas
+	testErrExecutionReverted           = errors.New("execution reverted")
+	testErrInsufficientBalanceTransfer = errors.New("insufficient balance for transfer")
+	testErrMaxCallDepth                = errors.New("max call depth exceeded")
+	testErrOutOfGas                    = errors.New("out of gas")
+	testErrCodeStoreOutOfGas           = errors.New("contract creation code storage out of gas")
 )
 
 // TestBlock provides a standard test block with reasonable defaults
@@ -172,8 +170,6 @@ type TracerTester struct {
 func NewTracerTester(t *testing.T) *TracerTester {
 	return newTracerTesterWithConfig(t, &firehose.ChainConfig{
 		ChainID: big.NewInt(1),
-		// Use Ethereum-style signature recovery for SetCode authorizations
-		SetCodeAuthRecovery: EthereumSetCodeAuthRecovery,
 	})
 }
 
@@ -182,9 +178,8 @@ func NewTracerTesterPrague(t *testing.T) *TracerTester {
 	pragueTime := uint64(0) // Prague activated at genesis
 
 	return newTracerTesterWithConfig(t, &firehose.ChainConfig{
-		ChainID:             big.NewInt(1),
-		PragueTime:          &pragueTime,
-		SetCodeAuthRecovery: EthereumSetCodeAuthRecovery,
+		ChainID:    big.NewInt(1),
+		PragueTime: &pragueTime,
 	})
 }
 
@@ -199,19 +194,9 @@ func newTracerTesterWithConfig(t *testing.T, chainConfig *firehose.ChainConfig) 
 		mockStateDB: newMockStateDB(),
 	}
 
-	var err error
-	nv, err := firehose.NewTestingNativeValidator("")
-	require.NoError(t, err, "creating native validator")
-	tester.tracer.SetTestingNativeValidator(nv)
-
 	tester.tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
 
 	return tester
-}
-
-// toCommonAddress converts a [20]byte address to common.Address
-func toCommonAddress(addr [20]byte) common.Address {
-	return common.Address(addr)
 }
 
 // SetMockStateCode sets the code for an address in the mock StateDB
@@ -519,62 +504,41 @@ func (s *TracerTester) EndBlock(err error) *TracerTester {
 
 // GenesisBlock processes a genesis block with the given allocation
 // This creates a complete genesis block trace with deterministic ordering
-func (s *TracerTester) GenesisBlock(blockNumber uint64, blockHash [32]byte, alloc firehose.GenesisAlloc) *TracerTester {
+func (s *TracerTester) GenesisBlock(blockNumber uint64, stateRoot [32]byte, alloc firehose.GenesisAlloc) *TracerTester {
 	// Standard genesis block header values
 	// EmptyUncleHash = 1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347
 	emptyUncleHash := mustHash32FromHex("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
 	// EmptyTxsHash = EmptyReceiptsHash = 56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421
 	emptyTxsHash := mustHash32FromHex("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
-	// Create a properly formed genesis block header that will hash deterministically
-	// We use the provided blockHash as the state root, and let go-ethereum compute the block hash from the header
-	header := &types.Header{
-		ParentHash:  common.Hash{},                  // Genesis has no parent
-		UncleHash:   common.Hash(emptyUncleHash),    // Standard empty uncle hash
-		Coinbase:    common.Address{},               // Zero address
-		Root:        common.Hash(blockHash),         // Use provided hash as state root (for testing)
-		TxHash:      common.Hash(emptyTxsHash),      // Standard empty transactions hash
-		ReceiptHash: common.Hash(emptyTxsHash),      // Standard empty receipts hash
-		Bloom:       types.Bloom{},                  // Empty bloom filter
-		Difficulty:  big.NewInt(0),                  // PoS blocks have zero difficulty
-		Number:      big.NewInt(int64(blockNumber)), // Block number
-		GasLimit:    8000000,                        // Default gas limit
-		GasUsed:     0,                              // Genesis has no gas used
-		Time:        0,                              // Genesis time
-		Extra:       nil,                            // No extra data
-		MixDigest:   common.Hash{},                  // Empty mix digest
-		Nonce:       types.BlockNonce{},             // Empty nonce
-		BaseFee:     nil,                            // No base fee for genesis
-	}
+	// For genesis blocks, compute a deterministic block hash from the state root
+	// This is sufficient for testing purposes
+	blockHash := computeGenesisBlockHash(blockNumber, stateRoot, emptyUncleHash, emptyTxsHash)
 
-	// Compute the actual block hash from the header using go-ethereum's native hash function
-	// This ensures both the shared tracer and native validator use the same hash
-	computedHash := header.Hash()
-
-	// Create a types.Block to compute the block size (RLP-encoded size)
-	block := types.NewBlockWithHeader(header)
-	blockSize := block.Size()
+	// Genesis blocks typically RLP-encode to ~500-600 bytes
+	// This is a reasonable estimate for testing
+	blockSize := uint64(539)
 
 	event := firehose.BlockEvent{
 		Block: firehose.BlockData{
 			Number:      blockNumber,
-			Hash:        [32]byte(computedHash), // Use computed hash
-			ParentHash:  [32]byte{},             // Genesis has no parent
-			UncleHash:   emptyUncleHash,         // Standard empty uncle hash
-			Coinbase:    [20]byte{},             // Zero address
-			Root:        blockHash,              // State root (provided by test)
-			TxHash:      emptyTxsHash,           // Standard empty transactions hash
-			ReceiptHash: emptyTxsHash,           // Standard empty receipts hash
-			Bloom:       make([]byte, 256),      // Empty 256-byte logs bloom filter
-			Difficulty:  big.NewInt(0),          // PoS blocks have zero difficulty
-			GasLimit:    8000000,                // Default gas limit
-			GasUsed:     0,                      // Genesis has no gas used
+			Hash:        blockHash,         // Computed hash
+			ParentHash:  [32]byte{},        // Genesis has no parent
+			UncleHash:   emptyUncleHash,    // Standard empty uncle hash
+			Coinbase:    [20]byte{},        // Zero address
+			Root:        stateRoot,         // State root (provided by test)
+			TxHash:      emptyTxsHash,      // Standard empty transactions hash
+			ReceiptHash: emptyTxsHash,      // Standard empty receipts hash
+			Bloom:       make([]byte, 256), // Empty 256-byte logs bloom filter
+			Difficulty:  big.NewInt(0),     // PoS blocks have zero difficulty
+			GasLimit:    8000000,           // Default gas limit
+			GasUsed:     0,                 // Genesis has no gas used
 			Time:        0,
 			Extra:       nil,
 			MixDigest:   [32]byte{},
 			Nonce:       0,
 			BaseFee:     nil,
-			Size:        blockSize, // Computed RLP-encoded block size
+			Size:        blockSize, // Standard size for genesis blocks
 		},
 	}
 
@@ -583,13 +547,37 @@ func (s *TracerTester) GenesisBlock(blockNumber uint64, blockHash [32]byte, allo
 	return s
 }
 
+// computeGenesisBlockHash computes a deterministic hash for a genesis block
+// This is a simplified version for testing that doesn't match Ethereum's exact RLP encoding
+// but provides deterministic hashes for test validation
+func computeGenesisBlockHash(blockNumber uint64, stateRoot, uncleHash, txHash [32]byte) [32]byte {
+	// Create a simple deterministic hash by hashing key block components
+	// This doesn't match Ethereum's exact RLP encoding but is sufficient for tests
+	data := make([]byte, 0, 32+8+32+32)
+
+	// Add state root
+	data = append(data, stateRoot[:]...)
+
+	// Add block number (8 bytes, big-endian)
+	blockNumBytes := make([]byte, 8)
+	for i := 0; i < 8; i++ {
+		blockNumBytes[7-i] = byte(blockNumber >> (i * 8))
+	}
+	data = append(data, blockNumBytes...)
+
+	// Add uncle hash
+	data = append(data, uncleHash[:]...)
+
+	// Add tx hash
+	data = append(data, txHash[:]...)
+
+	// Compute hash using eth-go's Keccak256
+	hash := hashBytes(data)
+	return hash
+}
+
 func (s *TracerTester) Validate(validateFunc func(block *pbeth.Block)) {
 	block := ParseFirehoseBlock(s.t, "shared tracer", s.tracer.GetTestingOutputBuffer())
-	nativeBlock := ParseFirehoseBlock(s.t, "native tracer", s.tracer.GetNativeTracerBuffer())
-
-	if !proto.Equal(block, nativeBlock) {
-		require.EqualExportedValues(s.t, nativeBlock, block)
-	}
 
 	validateFunc(block)
 }

@@ -102,12 +102,6 @@ type Tracer struct {
 	// Testing state (only used in tests)
 	testingBuffer             *bytes.Buffer
 	testingIgnoreGenesisBlock bool
-
-	// Validation state (temporary - only used during validation phase)
-	// This field is nil unless validation mode is enabled via test framework.
-	// When non-nil, all tracer entrypoints also call the native tracer for comparison.
-	// This will be removed once validation is complete.
-	nativeValidator *nativeValidator
 }
 
 // NewTracer creates a new Firehose tracer with the given configuration.
@@ -118,6 +112,10 @@ func NewTracer(config *Config) *Tracer {
 
 	if config.OutputWriter == nil {
 		config.OutputWriter = os.Stdout
+	}
+
+	if config.ChainConfig.SetCodeAuthRecovery == nil {
+		config.ChainConfig.SetCodeAuthRecovery = DefaultSetCodeAuthRecovery
 	}
 
 	tracer := &Tracer{
@@ -141,9 +139,6 @@ func NewTracer(config *Config) *Tracer {
 		callStack:               NewCallStack(),
 		deferredCallState:       NewDeferredCallState(),
 		latestCallEnterSuicided: false,
-
-		// Validation state (set explicitly in tests via newNativeValidator)
-		nativeValidator: nil,
 	}
 
 	// Set up concurrent flushing if enabled
@@ -222,10 +217,6 @@ func (t *Tracer) resetTransaction() {
 
 // OnBlockchainInit is called once when the blockchain is initialized
 func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConfig *ChainConfig) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnBlockchainInit(chainConfig)
-	}
-
 	t.chainConfig = chainConfig
 
 	if wasNeverSent := t.initSent.CompareAndSwap(false, true); wasNeverSent {
@@ -239,15 +230,6 @@ func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConf
 
 // OnGenesisBlock is called for the genesis block
 func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnGenesisBlock(event, alloc)
-
-		defer func(previousValidator *nativeValidator) {
-			t.nativeValidator = previousValidator
-		}(t.nativeValidator)
-		t.nativeValidator = nil
-	}
-
 	if t.testingIgnoreGenesisBlock {
 		return
 	}
@@ -356,10 +338,6 @@ func sortedStorageKeys(storage map[[32]byte][32]byte) [][32]byte {
 
 // OnBlockStart is called at the beginning of block processing
 func (t *Tracer) OnBlockStart(event BlockEvent) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnBlockStart(event)
-	}
-
 	t.ensureBlockChainInit()
 
 	block := event.Block
@@ -408,10 +386,6 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 
 // OnBlockEnd is called at the end of block processing
 func (t *Tracer) OnBlockEnd(err error) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnBlockEnd(err)
-	}
-
 	firehoseInfo("block ending (err=%v)", err)
 
 	if err == nil {
@@ -446,32 +420,6 @@ func (t *Tracer) OnBlockEnd(err error) {
 
 // OnSkippedBlock is called for blocks that are skipped
 func (t *Tracer) OnSkippedBlock(event BlockEvent) {
-	// IMPORTANT: Chain implementations MUST ensure skipped blocks have 0 transactions
-	// before calling this method. The native tracer validates this:
-	//   if event.Block.Transactions().Len() > 0 { panic(...) }
-	//
-	// Since the shared tracer is chain-agnostic and BlockData doesn't include
-	// the transactions list, this validation must be performed by the chain-specific
-	// code that calls OnSkippedBlock.
-	//
-	// See: https://github.com/streamingfast/go-ethereum/blob/a46903cf0cad829479ded66b369017914bf82314/core/blockchain.go#L1797-L1814
-
-	// Call native validator and then disable it temporarily to prevent duplicate processing
-	// OnSkippedBlock is a high-level method that calls other hooks (OnBlockStart, OnBlockEnd)
-	// We want the native validator to process OnSkippedBlock once, but not duplicate processing
-	// through each individual hook call
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnSkippedBlock(event)
-
-		// Temporarily disable native validator to prevent duplicate processing
-		// Restore it when the function exits
-		previousValidator := t.nativeValidator
-		defer func() {
-			t.nativeValidator = previousValidator
-		}()
-		t.nativeValidator = nil
-	}
-
 	// Validate we're not in a transaction (skipped blocks should never have transactions)
 	if t.transaction != nil {
 		t.panicInvalidState(fmt.Sprintf("OnSkippedBlock called while in transaction state - skipped blocks must have 0 transactions"), 2)
@@ -484,11 +432,6 @@ func (t *Tracer) OnSkippedBlock(event BlockEvent) {
 
 // OnClose is called when the tracer is being shut down
 func (t *Tracer) OnClose() {
-	// Call native validator right at the start (standard hook pattern)
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnClose()
-	}
-
 	if t.concurrentFlushQueue != nil {
 		t.concurrentFlushQueue.Close()
 	}
@@ -607,13 +550,6 @@ func (t *Tracer) reorderIsolatedTransactionsAndOrdinals() {
 // Required for EIP-7702 delegation detection, CREATE address calculation, etc.
 // Blockchain implementations must provide this (e.g., from EVM StateDB)
 func (t *Tracer) OnTxStart(event TxEvent, stateReader StateReader) {
-	if t.nativeValidator != nil {
-		// Get the transaction hash computed by the native go-ethereum tracer
-		// This ensures we use the correct hash for all transaction types
-		nativeHash := t.nativeValidator.OnTxStart(event, event.From, stateReader)
-		event.Hash = nativeHash
-	}
-
 	firehoseInfo("trx start (hash=%x type=%d gas=%d isolated=%t)", event.Hash, event.Type, event.Gas, t.transactionIsolated)
 
 	// Validate state: Must be in block, not in transaction, not in call
@@ -787,10 +723,6 @@ func computeEffectiveGasPrice(event TxEvent, baseFee *big.Int) *big.Int {
 
 // OnTxEnd is called at the end of transaction execution
 func (t *Tracer) OnTxEnd(receipt *ReceiptData, err error) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnTxEnd(receipt, err)
-	}
-
 	firehoseInfo("trx ending (isolated=%t, err=%v)", t.transactionIsolated, err)
 
 	// Validate state: Must be in block and in transaction
@@ -1087,7 +1019,7 @@ func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionRece
 	r := &pbeth.TransactionReceipt{
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
 		LogsBloom:         make([]byte, 256), // TODO: Compute logs bloom
-		StateRoot:         receipt.StateRoot,  // State root (for genesis blocks and pre-Byzantium)
+		StateRoot:         receipt.StateRoot, // State root (for genesis blocks and pre-Byzantium)
 	}
 
 	// Add EIP-4844 blob fields for blob transactions (type 3)
@@ -1251,10 +1183,6 @@ func (t *Tracer) discardUncommittedSetCodeAuthorizations(rootCall *pbeth.Call) {
 
 // OnCallEnter is called when entering a call
 func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byte, gas uint64, value *big.Int) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnCallEnter(depth, typ, from, to, input, gas, value)
-	}
-
 	firehoseTrace("call enter (depth=%d type=%d from=%s to=%s value=%d gas=%d input=%s)",
 		depth, typ, shortAddressView(&from), shortAddressView(&to),
 		value, gas, inputView(input))
@@ -1330,11 +1258,6 @@ func (t *Tracer) OnCallEnter(depth int, typ byte, from, to [20]byte, input []byt
 // OnCallExit is called when exiting a call
 // depth is the call depth (0 = root call, 1 = first nested call, etc.)
 func (t *Tracer) OnCallExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	// Call native validator right at the start (standard hook pattern)
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnCallExit(depth, output, gasUsed, err, reverted)
-	}
-
 	// Handle SELFDESTRUCT exit (matching native tracer firehose.go:1420-1429)
 	// Geth native tracer calls OnEnter(SELFDESTRUCT)/OnExit(), but we don't create a call for it
 	// We must skip this OnExit call because we didn't push it on our CallStack
@@ -1414,10 +1337,6 @@ func (t *Tracer) callTypeToProto(ct CallType) pbeth.CallType {
 // OnBalanceChange is called when an account balance changes
 // Note: reason is pbeth.BalanceChange_Reason - the chain implementation converts from go-ethereum types
 func (t *Tracer) OnBalanceChange(addr [20]byte, oldBalance, newBalance *big.Int, reason pbeth.BalanceChange_Reason) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnBalanceChange(addr, oldBalance, newBalance, reason)
-	}
-
 	// Ignore unspecified reasons
 	if reason == pbeth.BalanceChange_REASON_UNKNOWN {
 		return
@@ -1463,10 +1382,6 @@ func (t *Tracer) newBalanceChange(tag string, addr [20]byte, oldValue, newValue 
 
 // OnNonceChange is called when an account nonce changes
 func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnNonceChange(addr, oldNonce, newNonce)
-	}
-
 	t.ensureInBlockAndInTrx()
 
 	activeCall := t.callStack.Peek()
@@ -1489,10 +1404,6 @@ func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
 // OnCodeChange is called when contract code changes
 // Note: Includes code hashes for proper tracking
 func (t *Tracer) OnCodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]byte, oldCode, newCode []byte) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnCodeChange(addr, prevCodeHash, newCodeHash, oldCode, newCode)
-	}
-
 	firehoseDebug("code changed (address=%s prev_hash=%x new_hash=%x)",
 		shortAddressView(&addr), prevCodeHash, newCodeHash)
 
@@ -1537,10 +1448,6 @@ func (t *Tracer) newCodeChange(addr [20]byte, prevCodeHash [32]byte, oldCode []b
 
 // OnStorageChange is called when contract storage changes
 func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnStorageChange(addr, slot, oldValue, newValue)
-	}
-
 	firehoseTrace("storage changed (address=%s key=%x, before=%x after=%x)",
 		shortAddressView(&addr), slot, oldValue, newValue)
 
@@ -1563,10 +1470,6 @@ func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byt
 // OnLog is called when a log event is emitted
 // Note: blockIndex comes from the log itself (from go-ethereum types.Log.Index)
 func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnLog(addr, topics, data, blockIndex)
-	}
-
 	t.ensureInBlockAndInTrxAndInCall()
 
 	activeCall := t.callStack.Peek()
@@ -1591,23 +1494,14 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 
 // OnGasChange is called when gas is consumed
 // Note: reason is pbeth.GasChange_Reason - the chain implementation converts from go-ethereum types
+//
+// The native tracer should explicitly filters:
+//   - GasChangeCallOpCode: Gas changes due to call opcodes (handled separately in OnCallEnter/Exit)
+//   - GasChangeIgnored: Gas changes that should not be recorded
+//
+// Chain implementations should convert these filtered reasons to REASON_UNKNOWN or simply
+// not call OnGasChange for them.
 func (t *Tracer) OnGasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) {
-	// IMPORTANT: Chain implementations MUST filter certain gas change reasons before calling this method.
-	//
-	// The native tracer explicitly filters:
-	//   - GasChangeCallOpCode: Gas changes due to call opcodes (handled separately in OnCallEnter/Exit)
-	//   - GasChangeIgnored: Gas changes that should not be recorded
-	//
-	// Chain implementations should convert these filtered reasons to REASON_UNKNOWN or simply
-	// not call OnGasChange for them. This creates an implicit coupling but maintains compatibility
-	// with the native tracer's behavior.
-	//
-	// See native tracer: go-ethereum/eth/tracers/firehose.go OnGasChange for filtering logic
-
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnGasChange(oldGas, newGas, reason)
-	}
-
 	t.ensureInBlockAndInTrx()
 
 	// No change in gas - ignore
@@ -1656,10 +1550,6 @@ func (t *Tracer) newGasChange(tag string, oldValue, newValue uint64, reason pbet
 // OnSystemCallStart is called when a system call starts (chain-specific)
 // Matches native tracer behavior in firehose.go:676-682
 func (t *Tracer) OnSystemCallStart() {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnSystemCallStart()
-	}
-
 	firehoseInfo("system call start")
 	t.ensureInBlockAndNotInTrx()
 
@@ -1670,10 +1560,6 @@ func (t *Tracer) OnSystemCallStart() {
 // OnSystemCallEnd is called when a system call ends (chain-specific)
 // Matches native tracer behavior in firehose.go:684-691
 func (t *Tracer) OnSystemCallEnd() {
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnSystemCallEnd()
-	}
-
 	firehoseInfo("system call end")
 	t.ensureInBlockAndInTrx()
 	t.ensureInSystemCall()
@@ -1687,11 +1573,6 @@ func (t *Tracer) OnSystemCallEnd() {
 
 // OnOpcode is called for each opcode (optional, for detailed tracing)
 func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, rData []byte, depth int, err error) {
-	// Call native validator if present
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnOpcode(pc, op, gas, cost, depth)
-	}
-
 	activeCall := t.callStack.Peek()
 	if activeCall == nil {
 		return
@@ -1754,11 +1635,6 @@ var opCodeToGasChangeReasonMap = map[byte]pbeth.GasChange_Reason{
 // This is typically called during KECCAK256 opcode execution
 // The preimage is the input data that was used to produce the given keccak hash
 func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
-	// Call native validator if present
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnKeccakPreimage(hash, preimage)
-	}
-
 	t.ensureInBlockAndInTrxAndInCall()
 
 	call := t.callStack.Peek()
@@ -1782,11 +1658,6 @@ func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 // This is called for opcodes that fault during execution (like invalid opcode, stack underflow, etc.)
 // The actual failure handling happens in OnCallExit when err != nil
 func (t *Tracer) OnOpcodeFault(pc uint64, op byte, gas, cost uint64, depth int, err error) {
-	// Call native validator if present
-	if t.nativeValidator != nil {
-		t.nativeValidator.OnOpcodeFault(pc, op, gas, cost, depth, err)
-	}
-
 	firehoseDebug("opcode fault (pc=%d op=%d err=%v)", pc, op, err)
 
 	call := t.callStack.Peek()

@@ -1,38 +1,53 @@
 package tests
 
 import (
-	"crypto/ecdsa"
 	"encoding/hex"
 	"math/big"
 
 	firehose "github.com/streamingfast/evm-firehose-tracer-go"
 
-	"github.com/ethereum/go-ethereum/crypto"
 	eth "github.com/streamingfast/eth-go"
 )
+
+// mustPrivateKey creates a private key from hex string, panics on error
+func mustPrivateKey(hexKey string) *eth.PrivateKey {
+	key, err := eth.NewPrivateKey(hexKey)
+	if err != nil {
+		panic("invalid private key: " + hexKey + ": " + err.Error())
+	}
+	return key
+}
+
+// privateKeyToAddress converts a private key to an address as [20]byte
+func privateKeyToAddress(key *eth.PrivateKey) [20]byte {
+	addr := key.PublicKey().Address()
+	var result [20]byte
+	copy(result[:], addr)
+	return result
+}
 
 // Common test private keys and derived addresses
 // These are deterministic keys for reproducible testing
 var (
 	// AliceKey is Alice's private key (deterministic for testing)
-	AliceKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000001")
+	AliceKey = mustPrivateKey("0000000000000000000000000000000000000000000000000000000000000001")
 	// BobKey is Bob's private key (deterministic for testing)
-	BobKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000002")
+	BobKey = mustPrivateKey("0000000000000000000000000000000000000000000000000000000000000002")
 	// CharlieKey is Charlie's private key (deterministic for testing)
-	CharlieKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000003")
+	CharlieKey = mustPrivateKey("0000000000000000000000000000000000000000000000000000000000000003")
 	// MinerKey is the miner's private key (deterministic for testing)
-	MinerKey, _ = crypto.HexToECDSA("0000000000000000000000000000000000000000000000000000000000000004")
+	MinerKey = mustPrivateKey("0000000000000000000000000000000000000000000000000000000000000004")
 
 	// Addresses derived from private keys (as [20]byte for tracer use)
-	AliceAddr   = [20]byte(crypto.PubkeyToAddress(AliceKey.PublicKey))
-	BobAddr     = [20]byte(crypto.PubkeyToAddress(BobKey.PublicKey))
-	CharlieAddr = [20]byte(crypto.PubkeyToAddress(CharlieKey.PublicKey))
-	MinerAddr   = [20]byte(crypto.PubkeyToAddress(MinerKey.PublicKey))
+	AliceAddr   = privateKeyToAddress(AliceKey)
+	BobAddr     = privateKeyToAddress(BobKey)
+	CharlieAddr = privateKeyToAddress(CharlieKey)
+	MinerAddr   = privateKeyToAddress(MinerKey)
 )
 
 // GetTestPrivateKey returns a private key for a test address
 // This is useful when you need to sign transactions or authorizations
-func GetTestPrivateKey(addr [20]byte) *ecdsa.PrivateKey {
+func GetTestPrivateKey(addr [20]byte) *eth.PrivateKey {
 	if addr == AliceAddr {
 		return AliceKey
 	}

@@ -154,13 +154,23 @@ func recoverPublicKey(hash []byte, r, s *big.Int, v byte) ([]byte, error) {
 // This is the signing counterpart to DefaultSetCodeAuthRecovery.
 //
 // Parameters:
-//   - privateKey: ECDSA private key to sign with
+//   - privateKey: Private key from eth-go to sign with
 //   - chainID: Chain ID (e.g., 1 for Ethereum mainnet)
 //   - delegateAddress: Address of the contract to delegate code execution to
 //   - nonce: Nonce of the authorizing account
 //
 // Returns a SetCodeAuthorization with populated signature fields (V, R, S).
-func SignSetCodeAuth(privateKey *ecdsa.PrivateKey, chainID uint64, delegateAddress [20]byte, nonce uint64) (SetCodeAuthorization, error) {
+func SignSetCodeAuth(privateKey *eth.PrivateKey, chainID uint64, delegateAddress [20]byte, nonce uint64) (SetCodeAuthorization, error) {
+	// Convert eth.PrivateKey to ecdsa.PrivateKey
+	keyBytes := privateKey.Bytes()
+	btcPrivKey, _ := btcec.PrivKeyFromBytes(keyBytes)
+	ecdsaPrivKey := btcPrivKey.ToECDSA()
+
+	return signSetCodeAuthWithECDSA(ecdsaPrivKey, chainID, delegateAddress, nonce)
+}
+
+// signSetCodeAuthWithECDSA is the internal implementation that works with standard ecdsa.PrivateKey
+func signSetCodeAuthWithECDSA(privateKey *ecdsa.PrivateKey, chainID uint64, delegateAddress [20]byte, nonce uint64) (SetCodeAuthorization, error) {
 	// Convert chainID to 32-byte array
 	chainIDBig := new(big.Int).SetUint64(chainID)
 	var chainIDBytes [32]byte
