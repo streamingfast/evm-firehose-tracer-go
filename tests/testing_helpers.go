@@ -128,6 +128,7 @@ func successReceipt(gasUsed uint64) *firehose.ReceiptData {
 		TransactionIndex:  0,
 		Status:            1,
 		GasUsed:           gasUsed,
+		LogsBloom:         [256]byte{}, // Empty bloom (no logs)
 		CumulativeGasUsed: gasUsed,
 	}
 }
@@ -138,6 +139,7 @@ func failedReceipt(gasUsed uint64) *firehose.ReceiptData {
 		TransactionIndex:  0,
 		Status:            0,
 		GasUsed:           gasUsed,
+		LogsBloom:         [256]byte{}, // Empty bloom (no logs)
 		CumulativeGasUsed: gasUsed,
 	}
 }
@@ -160,6 +162,7 @@ func receiptWithLogs(gasUsed uint64, logs []firehose.LogData) *firehose.ReceiptD
 		TransactionIndex:  0,
 		Status:            1,
 		GasUsed:           gasUsed,
+		LogsBloom:         [256]byte{}, // Empty bloom (tests don't require accurate bloom computation)
 		CumulativeGasUsed: gasUsed,
 		Logs:              logs,
 	}
@@ -171,6 +174,7 @@ func failedReceiptWithLogs(gasUsed uint64, logs []firehose.LogData) *firehose.Re
 		TransactionIndex:  0,
 		Status:            0,
 		GasUsed:           gasUsed,
+		LogsBloom:         [256]byte{}, // Empty bloom (tests don't require accurate bloom computation)
 		CumulativeGasUsed: gasUsed,
 		Logs:              logs,
 	}
@@ -182,6 +186,7 @@ func receiptAt(index uint32, status uint64, gasUsed uint64, cumulativeGas uint64
 		TransactionIndex:  index,
 		Status:            status,
 		GasUsed:           gasUsed,
+		LogsBloom:         [256]byte{}, // Empty bloom (tests don't require accurate bloom computation)
 		CumulativeGasUsed: cumulativeGas,
 		Logs:              logs,
 	}

@@ -196,6 +196,7 @@ func TestTracer_CompleteTransaction_BlobTransaction(t *testing.T) {
 			TransactionIndex:  0,
 			Status:            1,
 			GasUsed:           50000,
+			LogsBloom:         [256]byte{}, // Empty bloom (no logs)
 			CumulativeGasUsed: 50000,
 			BlobGasUsed:       blobGasUsed,
 			BlobGasPrice:      blobGasPrice,

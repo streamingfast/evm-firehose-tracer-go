@@ -113,6 +113,7 @@ type Config struct {
 	ChainConfig *ChainConfig
 
 	// Feature flags
+	IgnoreGenesisBlock       bool
 	EnableConcurrentFlushing bool
 	ConcurrentBufferSize     int
 

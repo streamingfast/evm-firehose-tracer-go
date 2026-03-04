@@ -98,10 +98,6 @@ type Tracer struct {
 
 	// System calls tracking (used in some chains via OnSystemCallStart/End hooks)
 	systemCalls []*pbeth.Call
-
-	// Testing state (only used in tests)
-	testingBuffer             *bytes.Buffer
-	testingIgnoreGenesisBlock bool
 }
 
 // NewTracer creates a new Firehose tracer with the given configuration.
@@ -112,10 +108,6 @@ func NewTracer(config *Config) *Tracer {
 
 	if config.OutputWriter == nil {
 		config.OutputWriter = os.Stdout
-	}
-
-	if config.ChainConfig.SetCodeAuthRecovery == nil {
-		config.ChainConfig.SetCodeAuthRecovery = DefaultSetCodeAuthRecovery
 	}
 
 	tracer := &Tracer{
@@ -217,12 +209,15 @@ func (t *Tracer) resetTransaction() {
 
 // OnBlockchainInit is called once when the blockchain is initialized
 func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConfig *ChainConfig) {
-	t.chainConfig = chainConfig
-
 	if wasNeverSent := t.initSent.CompareAndSwap(false, true); wasNeverSent {
 		t.printToFirehose("FIRE INIT", ProtocolVersion, "firehose-evm-tracer/"+nodeName, nodeVersion)
 	} else {
 		panic("OnBlockchainInit was called more than once")
+	}
+
+	t.chainConfig = chainConfig
+	if t.chainConfig.SetCodeAuthRecovery == nil {
+		t.chainConfig.SetCodeAuthRecovery = DefaultSetCodeAuthRecovery
 	}
 
 	firehoseInfo("tracer initialized (chain_id=%d)", chainConfig.ChainID)
@@ -230,7 +225,7 @@ func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConf
 
 // OnGenesisBlock is called for the genesis block
 func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
-	if t.testingIgnoreGenesisBlock {
+	if t.config.IgnoreGenesisBlock {
 		return
 	}
 
@@ -289,6 +284,7 @@ func (t *Tracer) OnGenesisBlock(event BlockEvent, alloc GenesisAlloc) {
 		TransactionIndex:  0,
 		Status:            1, // Success
 		GasUsed:           0,
+		LogsBloom:         [256]byte{}, // Empty bloom for genesis (no logs)
 		CumulativeGasUsed: 0,
 		Logs:              nil,
 		StateRoot:         event.Block.Root[:], // Genesis block state root
@@ -422,7 +418,7 @@ func (t *Tracer) OnBlockEnd(err error) {
 func (t *Tracer) OnSkippedBlock(event BlockEvent) {
 	// Validate we're not in a transaction (skipped blocks should never have transactions)
 	if t.transaction != nil {
-		t.panicInvalidState(fmt.Sprintf("OnSkippedBlock called while in transaction state - skipped blocks must have 0 transactions"), 2)
+		t.panicInvalidState("OnSkippedBlock called while in transaction state - skipped blocks must have 0 transactions", 2)
 	}
 
 	// Trace the block as normal, the Firehose system will discard it if needed
@@ -1018,8 +1014,8 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 func (t *Tracer) newReceiptFromData(receipt *ReceiptData) *pbeth.TransactionReceipt {
 	r := &pbeth.TransactionReceipt{
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
-		LogsBloom:         make([]byte, 256), // TODO: Compute logs bloom
-		StateRoot:         receipt.StateRoot, // State root (for genesis blocks and pre-Byzantium)
+		LogsBloom:         receipt.LogsBloom[:], // Logs bloom filter (256 bytes, computed by chain implementation)
+		StateRoot:         receipt.StateRoot,    // State root (for genesis blocks and pre-Byzantium)
 	}
 
 	// Add EIP-4844 blob fields for blob transactions (type 3)

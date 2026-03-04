@@ -20,22 +20,13 @@ func (t *Tracer) GetTestingOutputBuffer() *bytes.Buffer {
 }
 
 // printToFirehose writes a message to the Firehose output stream
-func (t *Tracer) printToFirehose(args ...interface{}) {
+func (t *Tracer) printToFirehose(args ...any) {
 	line := fmt.Sprintln(args...)
-	if t.testingBuffer != nil {
-		t.testingBuffer.WriteString(line)
-	} else {
-		t.outputWriter.Write([]byte(line))
-	}
+	t.outputWriter.Write([]byte(line))
 }
 
 // flushToFirehose writes bytes directly to the output stream
 func (t *Tracer) flushToFirehose(bytes []byte) error {
-	if t.testingBuffer != nil {
-		t.testingBuffer.Write(bytes)
-		return nil
-	}
-
 	_, err := t.outputWriter.Write(bytes)
 	return err
 }

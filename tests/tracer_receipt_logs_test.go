@@ -305,6 +305,124 @@ func TestTracer_LogsInRevertedCalls(t *testing.T) {
 	})
 }
 
+// TestTracer_ReceiptLogsBloom tests that logsBloom is properly populated from receipt
+func TestTracer_ReceiptLogsBloom(t *testing.T) {
+	t.Run("empty_bloom_for_transaction_without_logs", func(t *testing.T) {
+		receipt := &firehose.ReceiptData{
+			TransactionIndex:  0,
+			Status:            1,
+			GasUsed:           21000,
+			LogsBloom:         [256]byte{}, // Empty bloom (no logs)
+			CumulativeGasUsed: 21000,
+			Logs:              nil,
+		}
+
+		NewTracerTester(t).
+			StartBlockTrx(TestLegacyTrx).
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{0x01}).
+			EndCall([]byte{}, 20000).
+			EndBlockTrx(receipt, nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.NotNil(t, trx.Receipt, "Receipt should exist")
+				require.NotNil(t, trx.Receipt.LogsBloom, "LogsBloom should not be nil")
+				assert.Equal(t, 256, len(trx.Receipt.LogsBloom), "LogsBloom should be 256 bytes")
+
+				// Verify all bytes are zero (empty bloom)
+				for i, b := range trx.Receipt.LogsBloom {
+					assert.Equal(t, byte(0), b, "LogsBloom byte %d should be 0", i)
+				}
+			})
+	})
+
+	t.Run("non_empty_bloom_for_transaction_with_logs", func(t *testing.T) {
+		// Create a non-empty bloom (simulated - in real scenario this would be computed from logs)
+		bloom := [256]byte{}
+		bloom[0] = 0x01 // Set first byte to non-zero to simulate bloom with data
+		bloom[100] = 0x42
+		bloom[255] = 0xff
+
+		receiptLogs := []firehose.LogData{
+			log1(BobAddr, topic("Transfer"), []byte{0x01}),
+		}
+
+		receipt := &firehose.ReceiptData{
+			TransactionIndex:  0,
+			Status:            1,
+			GasUsed:           30000,
+			LogsBloom:         bloom, // Non-empty bloom
+			CumulativeGasUsed: 30000,
+			Logs:              receiptLogs,
+		}
+
+		NewTracerTester(t).
+			StartBlockTrx(TestLegacyTrx).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			Log(BobAddr, [][32]byte{topic("Transfer")}, []byte{0x01}, 0).
+			EndCall([]byte{}, 95000).
+			EndBlockTrx(receipt, nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.NotNil(t, trx.Receipt, "Receipt should exist")
+				require.NotNil(t, trx.Receipt.LogsBloom, "LogsBloom should not be nil")
+				assert.Equal(t, 256, len(trx.Receipt.LogsBloom), "LogsBloom should be 256 bytes")
+
+				// Verify bloom data matches what we passed in
+				assert.Equal(t, byte(0x01), trx.Receipt.LogsBloom[0], "LogsBloom[0] should be 0x01")
+				assert.Equal(t, byte(0x42), trx.Receipt.LogsBloom[100], "LogsBloom[100] should be 0x42")
+				assert.Equal(t, byte(0xff), trx.Receipt.LogsBloom[255], "LogsBloom[255] should be 0xff")
+			})
+	})
+
+	t.Run("bloom_preserved_from_receipt_input", func(t *testing.T) {
+		// Verify that bloom filter is faithfully copied from ReceiptData to TransactionReceipt
+		// This tests that the shared tracer properly accepts bloom from chain implementation
+		// rather than attempting to compute it
+		bloom := [256]byte{}
+		// Set specific pattern in bloom to verify exact bytes are preserved
+		bloom[0] = 0xaa
+		bloom[1] = 0xbb
+		bloom[50] = 0x12
+		bloom[100] = 0x34
+		bloom[200] = 0x56
+		bloom[254] = 0x78
+		bloom[255] = 0x9a
+
+		receipt := &firehose.ReceiptData{
+			TransactionIndex:  3, // Non-zero index to test that too
+			Status:            1,
+			GasUsed:           50000,
+			LogsBloom:         bloom,
+			CumulativeGasUsed: 150000,
+		}
+
+		NewTracerTester(t).
+			StartBlockTrx(TestLegacyTrx).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{0x01}).
+			EndCall([]byte{}, 95000).
+			EndBlockTrx(receipt, nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.NotNil(t, trx.Receipt, "Receipt should exist")
+				require.NotNil(t, trx.Receipt.LogsBloom, "LogsBloom should not be nil")
+				assert.Equal(t, 256, len(trx.Receipt.LogsBloom), "LogsBloom should be 256 bytes")
+
+				// Verify every byte we set is preserved exactly
+				assert.Equal(t, byte(0xaa), trx.Receipt.LogsBloom[0], "LogsBloom[0] not preserved")
+				assert.Equal(t, byte(0xbb), trx.Receipt.LogsBloom[1], "LogsBloom[1] not preserved")
+				assert.Equal(t, byte(0x12), trx.Receipt.LogsBloom[50], "LogsBloom[50] not preserved")
+				assert.Equal(t, byte(0x34), trx.Receipt.LogsBloom[100], "LogsBloom[100] not preserved")
+				assert.Equal(t, byte(0x56), trx.Receipt.LogsBloom[200], "LogsBloom[200] not preserved")
+				assert.Equal(t, byte(0x78), trx.Receipt.LogsBloom[254], "LogsBloom[254] not preserved")
+				assert.Equal(t, byte(0x9a), trx.Receipt.LogsBloom[255], "LogsBloom[255] not preserved")
+
+				// Verify unset bytes remain zero
+				assert.Equal(t, byte(0x00), trx.Receipt.LogsBloom[2], "Unset bloom byte should be 0")
+				assert.Equal(t, byte(0x00), trx.Receipt.LogsBloom[99], "Unset bloom byte should be 0")
+			})
+	})
+}
+
 // TestTracer_LogBlockIndex tests BlockIndex assignment and removal
 func TestTracer_LogBlockIndex(t *testing.T) {
 	t.Run("successful_logs_have_block_index", func(t *testing.T) {

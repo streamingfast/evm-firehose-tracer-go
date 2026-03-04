@@ -119,9 +119,9 @@ type TxEvent struct {
 	Index    uint32
 
 	// Signature fields
-	V []byte    // Signature V value (can be nil for unsigned transactions)
-	R [32]byte  // Signature R point
-	S [32]byte  // Signature S point
+	V []byte   // Signature V value (can be nil for unsigned transactions)
+	R [32]byte // Signature R point
+	S [32]byte // Signature S point
 
 	// EIP-1559 fields (type 2)
 	MaxFeePerGas         *big.Int
@@ -163,6 +163,7 @@ type ReceiptData struct {
 	GasUsed           uint64
 	Status            uint64
 	Logs              []LogData
+	LogsBloom         [256]byte
 	CumulativeGasUsed uint64
 	BlobGasUsed       uint64   // EIP-4844: Gas used for blob data
 	BlobGasPrice      *big.Int // EIP-4844: Price per unit of blob gas
