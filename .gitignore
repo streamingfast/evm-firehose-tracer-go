@@ -1,5 +1,7 @@
 .claude
 .sbox
+/build
+/dist
 /go-ethereum
 /go-ethereum-battlefield
 /variants

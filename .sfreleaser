@@ -1,0 +1,4 @@
+global:
+  binary: evm-firehose-tracer-go
+  language: golang
+  variant: library
