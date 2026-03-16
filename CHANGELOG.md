@@ -8,6 +8,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 * Gas changes tracking (`OnGasChange`, per-opcode gas recording) is no longer supported. The `GasChanges` field on calls will always be empty. Consumers that relied on this data must migrate to alternative gas accounting.
+
+## v4.0.3
+
+### Added
+
+* Add `Tracer.GetConfig() *Config` getter to expose the tracer's runtime configuration.
+* Add `Config.LogKeyValues() []any` returning a flat key-value list (keys prefixed with `config_`, values as human-readable strings) suitable for structured logging.
+
 ## v4.0.2
 
 ### Added
