@@ -5,9 +5,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased (v5.0.0)
 
+### Changed
+
+* Block withdrawals are now always recorded. The `Config.SkipWithdrawals` flag has been removed; consumers that previously relied on it to suppress withdrawals should handle filtering on their side if needed.
+
 ### Removed
 
 * Gas changes tracking (`OnGasChange`, per-opcode gas recording) is no longer supported. The `GasChanges` field on calls will always be empty. Consumers that relied on this data must migrate to alternative gas accounting.
+* Remove `Config.SkipWithdrawals` flag (see above).
 
 ## v4.0.3
 

@@ -436,18 +436,15 @@ func blockEventWithWithdrawals(withdrawals []firehose.WithdrawalData) firehose.B
 	}
 }
 
-// TestTracer_WithdrawalRecording tests that block.Withdrawals population respects Config.SkipWithdrawals
+// TestTracer_WithdrawalRecording tests that block.Withdrawals are always recorded in v5
 func TestTracer_WithdrawalRecording(t *testing.T) {
 	withdrawals := []firehose.WithdrawalData{
 		{Index: 0, ValidatorIndex: 1, Address: AliceAddr, Amount: 32_000_000_000},
 		{Index: 1, ValidatorIndex: 2, Address: BobAddr, Amount: 16_000_000_000},
 	}
 
-	t.Run("withdrawals_recorded_by_default", func(t *testing.T) {
-		// Default config (SkipWithdrawals = false) should populate block.Withdrawals
-		newTracerTesterWithFullConfig(t, &firehose.Config{
-			ChainConfig: &firehose.ChainConfig{ChainID: big.NewInt(1)},
-		}).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
+	t.Run("withdrawals_always_recorded", func(t *testing.T) {
+		NewTracerTester(t).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
 			require.Len(t, block.Withdrawals, 2)
 			assert.Equal(t, uint64(0), block.Withdrawals[0].Index)
 			assert.Equal(t, uint64(1), block.Withdrawals[0].ValidatorIndex)
@@ -458,34 +455,16 @@ func TestTracer_WithdrawalRecording(t *testing.T) {
 		})
 	})
 
-	t.Run("withdrawals_skipped_when_configured", func(t *testing.T) {
-		// SkipWithdrawals = true should leave block.Withdrawals empty
-		newTracerTesterWithFullConfig(t, &firehose.Config{
-			ChainConfig:     &firehose.ChainConfig{ChainID: big.NewInt(1)},
-			SkipWithdrawals: true,
-		}).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
-			assert.Empty(t, block.Withdrawals, "withdrawals should not be recorded when SkipWithdrawals is true")
-		})
-	})
-
-	t.Run("skip_withdrawals_does_not_affect_header_withdrawals_root", func(t *testing.T) {
-		// SkipWithdrawals only suppresses block.Withdrawals list, not the header's WithdrawalsRoot
-		newTracerTesterWithFullConfig(t, &firehose.Config{
-			ChainConfig:     &firehose.ChainConfig{ChainID: big.NewInt(1)},
-			SkipWithdrawals: true,
-		}).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
-			assert.Empty(t, block.Withdrawals, "withdrawals list should be empty")
-			require.NotNil(t, block.Header.WithdrawalsRoot, "header WithdrawalsRoot should still be set")
+	t.Run("withdrawals_root_always_set_in_header", func(t *testing.T) {
+		NewTracerTester(t).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
+			require.NotNil(t, block.Header.WithdrawalsRoot, "header WithdrawalsRoot should be set")
 			expectedRoot := hash32(999)
 			assert.Equal(t, expectedRoot[:], block.Header.WithdrawalsRoot)
 		})
 	})
 
 	t.Run("no_withdrawals_in_block_event", func(t *testing.T) {
-		// Block with no withdrawals should always produce empty block.Withdrawals
-		newTracerTesterWithFullConfig(t, &firehose.Config{
-			ChainConfig: &firehose.ChainConfig{ChainID: big.NewInt(1)},
-		}).ValidateWithCustomBlock(blockEventWithWithdrawals(nil), func(block *pbeth.Block) {
+		NewTracerTester(t).ValidateWithCustomBlock(blockEventWithWithdrawals(nil), func(block *pbeth.Block) {
 			assert.Empty(t, block.Withdrawals)
 		})
 	})

@@ -117,8 +117,6 @@ type Config struct {
 	IgnoreGenesisBlock       bool
 	EnableConcurrentFlushing bool
 	ConcurrentBufferSize     int
-	SkipWithdrawals          bool // When true, block.Withdrawals entries are not recorded (e.g. Ethereum Mainnet)
-
 	// Output destination (defaults to os.Stdout)
 	OutputWriter io.Writer
 }
@@ -131,7 +129,6 @@ func (c *Config) LogKeyValues() []any {
 		"config_ignore_genesis_block", fmt.Sprintf("%t", c.IgnoreGenesisBlock),
 		"config_enable_concurrent_flushing", fmt.Sprintf("%t", c.EnableConcurrentFlushing),
 		"config_concurrent_buffer_size", fmt.Sprintf("%d", c.ConcurrentBufferSize),
-		"config_skip_withdrawals", fmt.Sprintf("%t", c.SkipWithdrawals),
 	}
 }
 
