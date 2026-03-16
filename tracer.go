@@ -361,8 +361,8 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 		t.blockBaseFee = new(big.Int).Set(block.BaseFee)
 	}
 
-	// Add withdrawals if present
-	if len(block.Withdrawals) > 0 {
+	// Add withdrawals if present and not skipped by configuration
+	if !t.config.SkipWithdrawals && len(block.Withdrawals) > 0 {
 		t.block.Withdrawals = make([]*pbeth.Withdrawal, len(block.Withdrawals))
 		for i, w := range block.Withdrawals {
 			t.block.Withdrawals[i] = &pbeth.Withdrawal{

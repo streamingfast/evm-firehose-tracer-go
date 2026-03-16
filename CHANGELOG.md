@@ -3,11 +3,22 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v5.0.0
+## Unreleased (v5.0.0)
 
 ### Removed
 
 * Gas changes tracking (`OnGasChange`, per-opcode gas recording) is no longer supported. The `GasChanges` field on calls will always be empty. Consumers that relied on this data must migrate to alternative gas accounting.
+
+## v4.0.1
+
+### Added
+
+* Add `Config.SkipWithdrawals` flag to suppress recording of `block.Withdrawals` entries (e.g. Ethereum Mainnet which does not record withdrawals in the block model).
+
+### Removed
+
+* Remove gas changes tracking: `OnGasChange` hook, per-opcode gas recording, and all `GasChange` fields from the block model. This produces [Ethereum Mainnet Block version 5](https://docs.substreams.dev/reference-material/chain-support/ethereum-data-model#version-5).
+* Remove all backward compatibility code that was present for prior block model versions.
 
 ## v4.0.0
 
