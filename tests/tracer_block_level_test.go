@@ -4,7 +4,7 @@ import (
 	"math/big"
 	"testing"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go/v4"
+	firehose "github.com/streamingfast/evm-firehose-tracer-go/v5"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
