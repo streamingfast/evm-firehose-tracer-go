@@ -116,6 +116,7 @@ type Config struct {
 	IgnoreGenesisBlock       bool
 	EnableConcurrentFlushing bool
 	ConcurrentBufferSize     int
+	SkipWithdrawals          bool // When true, block.Withdrawals entries are not recorded (e.g. Ethereum Mainnet)
 
 	// Output destination (defaults to os.Stdout)
 	OutputWriter io.Writer

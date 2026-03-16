@@ -185,16 +185,25 @@ func NewTracerTesterPrague(t *testing.T) *TracerTester {
 
 // newTracerTesterWithConfig creates a tester with a specific chain config
 func newTracerTesterWithConfig(t *testing.T, chainConfig *firehose.ChainConfig) *TracerTester {
+	return newTracerTesterWithFullConfig(t, &firehose.Config{
+		ChainConfig:  chainConfig,
+		OutputWriter: &bytes.Buffer{},
+	})
+}
+
+// newTracerTesterWithFullConfig creates a tester with a full Config, giving access to all options.
+func newTracerTesterWithFullConfig(t *testing.T, config *firehose.Config) *TracerTester {
+	if config.OutputWriter == nil {
+		config.OutputWriter = &bytes.Buffer{}
+	}
+
 	tester := &TracerTester{
-		t: t,
-		tracer: firehose.NewTracer(&firehose.Config{
-			ChainConfig:  chainConfig,
-			OutputWriter: &bytes.Buffer{},
-		}),
+		t:           t,
+		tracer:      firehose.NewTracer(config),
 		mockStateDB: newMockStateDB(),
 	}
 
-	tester.tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
+	tester.tracer.OnBlockchainInit("test", "1.0.0", config.ChainConfig)
 
 	return tester
 }

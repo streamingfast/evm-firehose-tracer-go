@@ -1,10 +1,13 @@
 package tests
 
 import (
+	"math/big"
 	"testing"
 
+	firehose "github.com/streamingfast/evm-firehose-tracer-go/v4"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestTracer_BlockLevelBalanceChanges tests balance changes that occur at block level
@@ -406,5 +409,84 @@ func TestTracer_ComplexBlockScenarios(t *testing.T) {
 				assert.True(t, block.SystemCalls[1].EndOrdinal < block.TransactionTraces[0].BeginOrdinal)
 				assert.True(t, block.TransactionTraces[0].EndOrdinal < block.BalanceChanges[0].Ordinal)
 			})
+	})
+}
+
+// blockEventWithWithdrawals builds a BlockEvent that carries the given withdrawals list
+func blockEventWithWithdrawals(withdrawals []firehose.WithdrawalData) firehose.BlockEvent {
+	withdrawalsRoot := hash32(999)
+	return firehose.BlockEvent{
+		Block: firehose.BlockData{
+			Number:          100,
+			Hash:            hash32(1),
+			ParentHash:      hash32(2),
+			UncleHash:       hash32(3),
+			Coinbase:        AliceAddr,
+			Root:            hash32(4),
+			TxHash:          hash32(5),
+			ReceiptHash:     hash32(6),
+			Bloom:           make([]byte, 256),
+			Difficulty:      big.NewInt(0),
+			GasLimit:        30_000_000,
+			Time:            1704067200,
+			Size:            512,
+			Withdrawals:     withdrawals,
+			WithdrawalsRoot: &withdrawalsRoot,
+		},
+	}
+}
+
+// TestTracer_WithdrawalRecording tests that block.Withdrawals population respects Config.SkipWithdrawals
+func TestTracer_WithdrawalRecording(t *testing.T) {
+	withdrawals := []firehose.WithdrawalData{
+		{Index: 0, ValidatorIndex: 1, Address: AliceAddr, Amount: 32_000_000_000},
+		{Index: 1, ValidatorIndex: 2, Address: BobAddr, Amount: 16_000_000_000},
+	}
+
+	t.Run("withdrawals_recorded_by_default", func(t *testing.T) {
+		// Default config (SkipWithdrawals = false) should populate block.Withdrawals
+		newTracerTesterWithFullConfig(t, &firehose.Config{
+			ChainConfig: &firehose.ChainConfig{ChainID: big.NewInt(1)},
+		}).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
+			require.Len(t, block.Withdrawals, 2)
+			assert.Equal(t, uint64(0), block.Withdrawals[0].Index)
+			assert.Equal(t, uint64(1), block.Withdrawals[0].ValidatorIndex)
+			assert.Equal(t, AliceAddr[:], block.Withdrawals[0].Address)
+			assert.Equal(t, uint64(32_000_000_000), block.Withdrawals[0].Amount)
+			assert.Equal(t, uint64(1), block.Withdrawals[1].Index)
+			assert.Equal(t, BobAddr[:], block.Withdrawals[1].Address)
+		})
+	})
+
+	t.Run("withdrawals_skipped_when_configured", func(t *testing.T) {
+		// SkipWithdrawals = true should leave block.Withdrawals empty
+		newTracerTesterWithFullConfig(t, &firehose.Config{
+			ChainConfig:     &firehose.ChainConfig{ChainID: big.NewInt(1)},
+			SkipWithdrawals: true,
+		}).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
+			assert.Empty(t, block.Withdrawals, "withdrawals should not be recorded when SkipWithdrawals is true")
+		})
+	})
+
+	t.Run("skip_withdrawals_does_not_affect_header_withdrawals_root", func(t *testing.T) {
+		// SkipWithdrawals only suppresses block.Withdrawals list, not the header's WithdrawalsRoot
+		newTracerTesterWithFullConfig(t, &firehose.Config{
+			ChainConfig:     &firehose.ChainConfig{ChainID: big.NewInt(1)},
+			SkipWithdrawals: true,
+		}).ValidateWithCustomBlock(blockEventWithWithdrawals(withdrawals), func(block *pbeth.Block) {
+			assert.Empty(t, block.Withdrawals, "withdrawals list should be empty")
+			require.NotNil(t, block.Header.WithdrawalsRoot, "header WithdrawalsRoot should still be set")
+			expectedRoot := hash32(999)
+			assert.Equal(t, expectedRoot[:], block.Header.WithdrawalsRoot)
+		})
+	})
+
+	t.Run("no_withdrawals_in_block_event", func(t *testing.T) {
+		// Block with no withdrawals should always produce empty block.Withdrawals
+		newTracerTesterWithFullConfig(t, &firehose.Config{
+			ChainConfig: &firehose.ChainConfig{ChainID: big.NewInt(1)},
+		}).ValidateWithCustomBlock(blockEventWithWithdrawals(nil), func(block *pbeth.Block) {
+			assert.Empty(t, block.Withdrawals)
+		})
 	})
 }
