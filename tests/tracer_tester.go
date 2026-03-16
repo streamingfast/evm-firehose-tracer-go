@@ -203,7 +203,7 @@ func newTracerTesterWithFullConfig(t *testing.T, config *firehose.Config) *Trace
 		mockStateDB: newMockStateDB(),
 	}
 
-	tester.tracer.OnBlockchainInit("test", "1.0.0", config.ChainConfig)
+	tester.tracer.OnBlockchainInit("test", "1.0.0", config.ChainConfig, nil)
 
 	return tester
 }

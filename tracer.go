@@ -178,8 +178,11 @@ func (t *Tracer) resetTransaction() {
 	t.deferredCallState.Reset()
 }
 
-// OnBlockchainInit is called once when the blockchain is initialized
-func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConfig *ChainConfig) {
+// OnBlockchainInit is called once when the blockchain is initialized.
+// The optional configFunc, if non-nil, is called after chain config is set and allows
+// the caller to tweak Config fields based on chain-specific knowledge available at init time
+// (e.g. setting SkipWithdrawals based on chain ID).
+func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConfig *ChainConfig, configFunc func(*Config)) {
 	if wasNeverSent := t.initSent.CompareAndSwap(false, true); wasNeverSent {
 		t.printToFirehose("FIRE INIT", ProtocolVersion, "firehose-evm-tracer/"+nodeName, nodeVersion)
 	} else {
@@ -189,6 +192,10 @@ func (t *Tracer) OnBlockchainInit(nodeName string, nodeVersion string, chainConf
 	t.chainConfig = chainConfig
 	if t.chainConfig.SetCodeAuthRecovery == nil {
 		t.chainConfig.SetCodeAuthRecovery = DefaultSetCodeAuthRecovery
+	}
+
+	if configFunc != nil {
+		configFunc(t.config)
 	}
 
 	firehoseInfo("tracer initialized (chain_id=%d)", chainConfig.ChainID)

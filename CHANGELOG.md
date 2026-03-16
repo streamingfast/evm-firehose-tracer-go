@@ -8,6 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Removed
 
 * Gas changes tracking (`OnGasChange`, per-opcode gas recording) is no longer supported. The `GasChanges` field on calls will always be empty. Consumers that relied on this data must migrate to alternative gas accounting.
+## v4.0.2
+
+### Added
+
+* Add optional `configFunc func(*Config)` parameter to `OnBlockchainInit` allowing callers to tweak `Config` fields based on chain-specific knowledge available at init time (e.g. setting `SkipWithdrawals` based on chain ID).
 
 ## v4.0.1
 

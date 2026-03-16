@@ -117,7 +117,7 @@ func newConcurrentTracerTester(t *testing.T, bufferSize int, outputBuffer *bytes
 		mockStateDB: newMockStateDB(),
 	}
 
-	tester.tracer.OnBlockchainInit("test", "1.0.0", chainConfig)
+	tester.tracer.OnBlockchainInit("test", "1.0.0", chainConfig, nil)
 
 	return tester
 }
