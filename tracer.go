@@ -151,35 +151,6 @@ func NewTracer(config *Config) *Tracer {
 	return tracer
 }
 
-// newIsolatedTransactionTracer creates an isolated tracer for parallel per-transaction execution.
-// The isolated tracer shares block-level state but has its own transaction-specific state.
-// Results are stored in transactionTransient and merged back to the coordinator later.
-func (t *Tracer) newIsolatedTransactionTracer(tracerID string) *Tracer {
-	return &Tracer{
-		// Global state (shared from coordinator)
-		initSent:    t.initSent,
-		config:      t.config,
-		chainConfig: t.chainConfig,
-		hasher:      sha3.NewLegacyKeccak256(),
-		tracerID:    tracerID,
-
-		// Block state (shared from coordinator)
-		block:         t.block,
-		blockBaseFee:  t.blockBaseFee,
-		blockOrdinal:  &Ordinal{},
-		blockFinality: t.blockFinality,
-		blockRules:    t.blockRules,
-
-		// Transaction state (fresh for this isolated tracer)
-		transactionLogIndex: 0,
-		transactionIsolated: true,
-
-		// Call state (fresh for this isolated tracer)
-		callStack:               NewCallStack(),
-		deferredCallState:       NewDeferredCallState(),
-		latestCallEnterSuicided: false,
-	}
-}
 
 // resetBlock resets the block state only (not transaction or call state)
 func (t *Tracer) resetBlock() {
@@ -783,25 +754,35 @@ func (t *Tracer) OnTxSpawn(txIndex int) *Tracer {
 
 	firehoseInfo("spawning isolated tracer (tx_index=%d)", txIndex)
 
-	// Create isolated tracer sharing block state
-	isolated := &Tracer{
+	isolated := t.newIsolatedTransactionTracer(fmt.Sprintf("isolated-%d", txIndex))
+
+	firehoseInfo("spawned isolated tracer (tracer=%s)", isolated.tracerID)
+
+	return isolated
+}
+
+// newIsolatedTransactionTracer creates an isolated tracer for parallel per-transaction execution.
+// The isolated tracer shares block-level state but has its own transaction-specific state.
+// Results are merged back to the coordinator via OnTxCommit.
+func (t *Tracer) newIsolatedTransactionTracer(tracerID string) *Tracer {
+	return &Tracer{
 		// Shared global state (read-only from isolated tracer perspective)
 		config:      t.config,
 		chainConfig: t.chainConfig,
 		initSent:    t.initSent,
 		hasher:      sha3.NewLegacyKeccak256(),
-		tracerID:    fmt.Sprintf("isolated-%d", txIndex),
+		tracerID:    tracerID,
 
 		// Shared block state (read-only from isolated tracer perspective)
-		block:         t.block, // SHARED: reference to same block
+		block:         t.block,
 		blockBaseFee:  t.blockBaseFee,
 		blockFinality: t.blockFinality,
 		blockRules:    t.blockRules,
 
 		// Isolated state (unique per isolated tracer)
-		blockOrdinal:        &Ordinal{}, // Fresh ordinal counter (starts at 0)
+		blockOrdinal:        &Ordinal{},
 		transactionLogIndex: 0,
-		transactionIsolated: true, // ISOLATED MODE
+		transactionIsolated: true,
 
 		// Fresh transaction/call state
 		callStack:         NewCallStack(),
@@ -810,10 +791,6 @@ func (t *Tracer) OnTxSpawn(txIndex int) *Tracer {
 		// Link back to coordinator
 		coordinator: t,
 	}
-
-	firehoseInfo("spawned isolated tracer (tracer=%s)", isolated.tracerID)
-
-	return isolated
 }
 
 // OnTxReset resets the isolated tracer's transaction and transient state.
