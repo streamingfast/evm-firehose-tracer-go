@@ -151,6 +151,10 @@ func NewTracer(config *Config) *Tracer {
 	return tracer
 }
 
+// GetConfig returns the tracer's runtime configuration.
+func (t *Tracer) GetConfig() *Config {
+	return t.config
+}
 
 // resetBlock resets the block state only (not transaction or call state)
 func (t *Tracer) resetBlock() {

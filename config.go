@@ -1,6 +1,7 @@
 package firehose
 
 import (
+	"fmt"
 	"io"
 	"math/big"
 )
@@ -120,6 +121,18 @@ type Config struct {
 
 	// Output destination (defaults to os.Stdout)
 	OutputWriter io.Writer
+}
+
+// LogKeyValues returns a flat list of key-value pairs suitable for structured logging,
+// one pair per Config field (excluding ChainConfig and OutputWriter).
+// Keys are prefixed with "config_" and values are human-readable strings.
+func (c *Config) LogKeyValues() []any {
+	return []any{
+		"config_ignore_genesis_block", fmt.Sprintf("%t", c.IgnoreGenesisBlock),
+		"config_enable_concurrent_flushing", fmt.Sprintf("%t", c.EnableConcurrentFlushing),
+		"config_concurrent_buffer_size", fmt.Sprintf("%d", c.ConcurrentBufferSize),
+		"config_skip_withdrawals", fmt.Sprintf("%t", c.SkipWithdrawals),
+	}
 }
 
 // Helper function to check if a timestamp-based fork is active
