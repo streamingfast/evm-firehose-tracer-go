@@ -12,7 +12,6 @@ import (
 type DeferredCallState struct {
 	accountCreations []*pbeth.AccountCreation
 	balanceChanges   []*pbeth.BalanceChange
-	gasChanges       []*pbeth.GasChange
 	nonceChanges     []*pbeth.NonceChange
 	codeChanges      []*pbeth.CodeChange
 }
@@ -26,7 +25,6 @@ func NewDeferredCallState() *DeferredCallState {
 func (d *DeferredCallState) IsEmpty() bool {
 	return len(d.accountCreations) == 0 &&
 		len(d.balanceChanges) == 0 &&
-		len(d.gasChanges) == 0 &&
 		len(d.nonceChanges) == 0 &&
 		len(d.codeChanges) == 0
 }
@@ -35,7 +33,6 @@ func (d *DeferredCallState) IsEmpty() bool {
 func (d *DeferredCallState) Reset() {
 	d.accountCreations = nil
 	d.balanceChanges = nil
-	d.gasChanges = nil
 	d.nonceChanges = nil
 	d.codeChanges = nil
 }
@@ -48,11 +45,6 @@ func (d *DeferredCallState) AddAccountCreation(creation *pbeth.AccountCreation) 
 // AddBalanceChange adds a balance change to deferred state
 func (d *DeferredCallState) AddBalanceChange(change *pbeth.BalanceChange) {
 	d.balanceChanges = append(d.balanceChanges, change)
-}
-
-// AddGasChange adds a gas change to deferred state
-func (d *DeferredCallState) AddGasChange(change *pbeth.GasChange) {
-	d.gasChanges = append(d.gasChanges, change)
 }
 
 // AddNonceChange adds a nonce change to deferred state
@@ -87,7 +79,6 @@ func (d *DeferredCallState) MaybePopulateCallAndReset(source string, call *pbeth
 		// This maintains chronological order: before -> during -> after
 		call.AccountCreations = append(d.accountCreations, call.AccountCreations...)
 		call.BalanceChanges = append(d.balanceChanges, call.BalanceChanges...)
-		call.GasChanges = append(d.gasChanges, call.GasChanges...)
 		call.NonceChanges = append(d.nonceChanges, call.NonceChanges...)
 		call.CodeChanges = append(d.codeChanges, call.CodeChanges...)
 	} else {
@@ -95,7 +86,6 @@ func (d *DeferredCallState) MaybePopulateCallAndReset(source string, call *pbeth
 		// This maintains chronological order: before -> during -> after
 		call.AccountCreations = append(call.AccountCreations, d.accountCreations...)
 		call.BalanceChanges = append(call.BalanceChanges, d.balanceChanges...)
-		call.GasChanges = append(call.GasChanges, d.gasChanges...)
 		call.NonceChanges = append(call.NonceChanges, d.nonceChanges...)
 		call.CodeChanges = append(call.CodeChanges, d.codeChanges...)
 	}

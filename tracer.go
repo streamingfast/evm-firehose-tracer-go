@@ -347,7 +347,7 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 		Hash:   block.Hash[:],
 		Number: block.Number,
 		Header: t.newBlockHeaderFromBlockData(block),
-		Ver:    4, // Protocol version 4 (without backward compatibility)
+		Ver:    5, // Protocol version 5
 		Size:   block.Size,
 	}
 
@@ -1488,57 +1488,6 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 	t.transactionLogIndex++
 }
 
-// OnGasChange is called when gas is consumed
-// Note: reason is pbeth.GasChange_Reason - the chain implementation converts from go-ethereum types
-//
-// The native tracer should explicitly filters:
-//   - GasChangeCallOpCode: Gas changes due to call opcodes (handled separately in OnCallEnter/Exit)
-//   - GasChangeIgnored: Gas changes that should not be recorded
-//
-// Chain implementations should convert these filtered reasons to REASON_UNKNOWN or simply
-// not call OnGasChange for them.
-func (t *Tracer) OnGasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) {
-	t.ensureInBlockAndInTrx()
-
-	// No change in gas - ignore
-	if oldGas == newGas {
-		return
-	}
-
-	// Ignore UNKNOWN reasons (filtered by caller in chain implementation)
-	// Chain implementations must convert GasChangeCallOpCode and GasChangeIgnored to REASON_UNKNOWN
-	if reason == pbeth.GasChange_REASON_UNKNOWN {
-		return
-	}
-
-	activeCall := t.callStack.Peek()
-	change := t.newGasChange("tracer", oldGas, newGas, reason)
-
-	// Initial gas consumption happens before call starts - defer it
-	if activeCall == nil {
-		t.deferredCallState.AddGasChange(change)
-		return
-	}
-
-	activeCall.GasChanges = append(activeCall.GasChanges, change)
-}
-
-func (t *Tracer) newGasChange(tag string, oldValue, newValue uint64, reason pbeth.GasChange_Reason) *pbeth.GasChange {
-	firehoseTrace("gas consumed (tag=%s before=%d after=%d reason=%s)", tag, oldValue, newValue, reason)
-
-	// Should already be checked by caller, but safety check
-	if reason == pbeth.GasChange_REASON_UNKNOWN {
-		panic(fmt.Errorf("received unknown gas change reason %s", reason))
-	}
-
-	return &pbeth.GasChange{
-		OldValue: oldValue,
-		NewValue: newValue,
-		Reason:   reason,
-		Ordinal:  t.blockOrdinal.Next(),
-	}
-}
-
 // ============================================================================
 // Optional/Chain-Specific Hooks
 // ============================================================================
@@ -1574,9 +1523,7 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, rData []byte, de
 		return
 	}
 
-	// Set ExecutedCode to true (non-backward-compatible mode)
-	// This matches native tracer behavior in captureInterpreterStep (firehose.go:1296)
-	// Note: Native tracer ALWAYS sets this, no trace level check
+	// Set ExecutedCode to true
 	activeCall.ExecutedCode = true
 
 	// The rest of the logic expects that a call succeeded, nothing to do more here if the interpreter failed on this OpCode
@@ -1584,47 +1531,10 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, rData []byte, de
 		return
 	}
 
-	// The gas change must come first to retain Firehose backward compatibility. Indeed, before Firehose 3.0,
-	// we had a specific method `OnKeccakPreimage` that was called during the KECCAK256 opcode. However, in
-	// the new model, we do it through `OnOpcode`.
-	//
-	// The gas change recording in the previous Firehose patch was done before calling `OnKeccakPreimage` so
-	// we must do the same here.
-	//
-	// No need to wrap in apply backward compatibility, the old behavior is fine in all cases.
-	if cost > 0 {
-		if reason, found := opCodeToGasChangeReasonMap[op]; found {
-			activeCall.GasChanges = append(activeCall.GasChanges, t.newGasChange("state", gas, gas-cost, reason))
-		}
-	}
-
 	// Mark SELFDESTRUCT opcode (matching native tracer firehose.go:1193)
 	if op == 0xff { // SELFDESTRUCT opcode
 		activeCall.Suicide = true
 	}
-}
-
-// opCodeToGasChangeReasonMap maps opcodes to their gas change reasons
-// This allows tracking gas consumption per opcode type (matching native tracer firehose.go:1258)
-var opCodeToGasChangeReasonMap = map[byte]pbeth.GasChange_Reason{
-	0xf0: pbeth.GasChange_REASON_CONTRACT_CREATION,  // CREATE
-	0xf5: pbeth.GasChange_REASON_CONTRACT_CREATION2, // CREATE2
-	0xf1: pbeth.GasChange_REASON_CALL,               // CALL
-	0xfa: pbeth.GasChange_REASON_STATIC_CALL,        // STATICCALL
-	0xf2: pbeth.GasChange_REASON_CALL_CODE,          // CALLCODE
-	0xf4: pbeth.GasChange_REASON_DELEGATE_CALL,      // DELEGATECALL
-	0xf3: pbeth.GasChange_REASON_RETURN,             // RETURN
-	0xfd: pbeth.GasChange_REASON_REVERT,             // REVERT
-	0xa0: pbeth.GasChange_REASON_EVENT_LOG,          // LOG0
-	0xa1: pbeth.GasChange_REASON_EVENT_LOG,          // LOG1
-	0xa2: pbeth.GasChange_REASON_EVENT_LOG,          // LOG2
-	0xa3: pbeth.GasChange_REASON_EVENT_LOG,          // LOG3
-	0xa4: pbeth.GasChange_REASON_EVENT_LOG,          // LOG4
-	0xff: pbeth.GasChange_REASON_SELF_DESTRUCT,      // SELFDESTRUCT
-	0x37: pbeth.GasChange_REASON_CALL_DATA_COPY,     // CALLDATACOPY
-	0x39: pbeth.GasChange_REASON_CODE_COPY,          // CODECOPY
-	0x3c: pbeth.GasChange_REASON_EXT_CODE_COPY,      // EXTCODECOPY
-	0x3e: pbeth.GasChange_REASON_RETURN_DATA_COPY,   // RETURNDATACOPY
 }
 
 // OnKeccakPreimage is called when a keccak256 preimage is available
@@ -1642,9 +1552,7 @@ func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 		call.KeccakPreimages = make(map[string]string)
 	}
 
-	// Store the preimage as hex-encoded string
-	// Note: In non-backward-compatible mode (Ver 4), we store empty preimages as empty strings
-	// (not as "." like the old tracer did)
+	// Store the preimage as hex-encoded string (empty preimages stored as empty strings)
 	call.KeccakPreimages[hex.EncodeToString(hash[:])] = hex.EncodeToString(preimage)
 
 	firehoseTrace("keccak preimage (hash=%x preimage_len=%d)", hash, len(preimage))
@@ -1717,9 +1625,6 @@ func (t *Tracer) reorderCallOrdinals(call *pbeth.Call, ordinalBase uint64) uint6
 		change.Ordinal += ordinalBase
 	}
 	for _, change := range call.StorageChanges {
-		change.Ordinal += ordinalBase
-	}
-	for _, change := range call.GasChanges {
 		change.Ordinal += ordinalBase
 	}
 	for _, log := range call.Logs {

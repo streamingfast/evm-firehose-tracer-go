@@ -1,4 +1,4 @@
-module github.com/streamingfast/evm-firehose-tracer-go/v4
+module github.com/streamingfast/evm-firehose-tracer-go/v5
 
 go 1.25.4
 

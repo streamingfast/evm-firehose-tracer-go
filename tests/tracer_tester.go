@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go/v4"
+	firehose "github.com/streamingfast/evm-firehose-tracer-go/v5"
 
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/require"
@@ -339,12 +339,6 @@ func (s *TracerTester) CodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]b
 // StorageChange records a storage change
 func (s *TracerTester) StorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) *TracerTester {
 	s.tracer.OnStorageChange(addr, slot, oldValue, newValue)
-	return s
-}
-
-// GasChange records a gas change
-func (s *TracerTester) GasChange(oldGas, newGas uint64, reason pbeth.GasChange_Reason) *TracerTester {
-	s.tracer.OnGasChange(oldGas, newGas, reason)
 	return s
 }
 

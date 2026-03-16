@@ -3,7 +3,7 @@ package tests
 import (
 	"testing"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go/v4"
+	firehose "github.com/streamingfast/evm-firehose-tracer-go/v5"
 
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
@@ -15,7 +15,6 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 		// CONTRACT CREATE with value transfer combines:
 		// - Balance change (value transfer from caller to contract)
 		// - Code change (contract deployment)
-		// - Potentially gas changes
 
 		deployedCode := []byte{0x60, 0x80, 0x60, 0x40, 0x52} // Simple contract bytecode
 		codeHash := hash32(123)
@@ -29,8 +28,6 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 			BalanceChange(BobAddr, bigInt(0), bigInt(1000000), pbeth.BalanceChange_REASON_TRANSFER).
 			// Code deployment
 			CodeChange(BobAddr, prevHash, codeHash, nil, deployedCode).
-			// Gas consumption
-			GasChange(200000, 150000, pbeth.GasChange_REASON_CONTRACT_CREATION).
 			EndCall([]byte{}, 150000).
 			EndBlockTrx(successReceipt(200000), nil, nil).
 			Validate(func(block *pbeth.Block) {
@@ -40,12 +37,10 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 				// Verify all state changes are recorded
 				assert.Equal(t, 2, len(call.BalanceChanges), "Should have 2 balance changes")
 				assert.Equal(t, 1, len(call.CodeChanges), "Should have 1 code change")
-				assert.Equal(t, 1, len(call.GasChanges), "Should have 1 gas change")
 
 				// Verify ordinals are all increasing
 				assert.True(t, call.BalanceChanges[0].Ordinal < call.BalanceChanges[1].Ordinal)
 				assert.True(t, call.BalanceChanges[1].Ordinal < call.CodeChanges[0].Ordinal)
-				assert.True(t, call.CodeChanges[0].Ordinal < call.GasChanges[0].Ordinal)
 			})
 	})
 
@@ -101,7 +96,6 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 		// - Nonce change
 		// - Code change
 		// - Storage change
-		// - Gas change
 		// - Log emission
 
 		deployedCode := []byte{0x60, 0x02}
@@ -118,12 +112,10 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartCall(AliceAddr, BobAddr, bigInt(500000), 300000, []byte{}).
-			// All state change types
 			BalanceChange(AliceAddr, bigInt(10000000), bigInt(9500000), pbeth.BalanceChange_REASON_TRANSFER).
 			NonceChange(AliceAddr, 5, 6).
 			CodeChange(BobAddr, prevHash, codeHash, nil, deployedCode).
 			StorageChange(BobAddr, storageKey, zeroVal, storageVal).
-			GasChange(300000, 250000, pbeth.GasChange_REASON_CONTRACT_CREATION).
 			Log(BobAddr, logTopics, logData, 0).
 			EndCall([]byte{}, 250000).
 			EndBlockTrx(receiptWithLogs(300000, []firehose.LogData{
@@ -138,7 +130,6 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 				assert.Equal(t, 1, len(call.NonceChanges), "Should have nonce change")
 				assert.Equal(t, 1, len(call.CodeChanges), "Should have code change")
 				assert.Equal(t, 1, len(call.StorageChanges), "Should have storage change")
-				assert.Equal(t, 1, len(call.GasChanges), "Should have gas change")
 				assert.Equal(t, 1, len(call.Logs), "Should have log")
 
 				// Verify ordinals are strictly increasing across ALL types
@@ -147,7 +138,6 @@ func TestTracer_MultipleStateChanges(t *testing.T) {
 				ordinals = append(ordinals, call.NonceChanges[0].Ordinal)
 				ordinals = append(ordinals, call.CodeChanges[0].Ordinal)
 				ordinals = append(ordinals, call.StorageChanges[0].Ordinal)
-				ordinals = append(ordinals, call.GasChanges[0].Ordinal)
 				ordinals = append(ordinals, call.Logs[0].Ordinal)
 
 				// Check strict ordering

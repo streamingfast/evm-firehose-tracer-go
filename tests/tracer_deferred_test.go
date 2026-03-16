@@ -258,80 +258,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 	})
 
 	// =============================================================================
-	// Gas Changes - Deferred State
-	// =============================================================================
-
-	t.Run("gas_change_before_root_call", func(t *testing.T) {
-		// Gas change before call starts (intrinsic gas)
-		NewTracerTester(t).
-			StartBlockTrx(TestLegacyTrx).
-			GasChange(21000, 0, pbeth.GasChange_REASON_INTRINSIC_GAS).
-			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000).
-			EndBlockTrx(successReceipt(21000), nil, nil).
-			Validate(func(block *pbeth.Block) {
-				trx := block.TransactionTraces[0]
-				call := trx.Calls[0]
-
-				require.Equal(t, 1, len(call.GasChanges))
-				gc := call.GasChanges[0]
-				assert.Equal(t, uint64(21000), gc.OldValue)
-				assert.Equal(t, uint64(0), gc.NewValue)
-				assert.Equal(t, pbeth.GasChange_REASON_INTRINSIC_GAS, gc.Reason)
-			})
-	})
-
-	t.Run("gas_change_after_root_call", func(t *testing.T) {
-		// Gas change after call ends (gas refund)
-		NewTracerTester(t).
-			StartBlockTrx(TestLegacyTrx).
-			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			EndCall([]byte{}, 21000).
-			GasChange(0, 5000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
-			EndBlockTrx(successReceipt(21000), nil, nil).
-			Validate(func(block *pbeth.Block) {
-				trx := block.TransactionTraces[0]
-				call := trx.Calls[0]
-
-				require.Equal(t, 1, len(call.GasChanges))
-				gc := call.GasChanges[0]
-				assert.Equal(t, uint64(0), gc.OldValue)
-				assert.Equal(t, uint64(5000), gc.NewValue)
-				assert.Equal(t, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION, gc.Reason)
-			})
-	})
-
-	t.Run("gas_changes_mixed_before_during_after", func(t *testing.T) {
-		// Gas changes: before, during, after call
-		NewTracerTester(t).
-			StartBlockTrx(TestLegacyTrx).
-			// BEFORE: Intrinsic gas
-			GasChange(50000, 29000, pbeth.GasChange_REASON_INTRINSIC_GAS).
-			StartCall(AliceAddr, BobAddr, bigInt(100), 50000, []byte{}).
-			// DURING: Call execution (using STATE_COLD_ACCESS as example of gas consumed during call)
-			GasChange(29000, 8000, pbeth.GasChange_REASON_STATE_COLD_ACCESS).
-			EndCall([]byte{}, 8000).
-			// AFTER: Gas refund
-			GasChange(8000, 13000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
-			EndBlockTrx(successReceipt(37000), nil, nil).
-			Validate(func(block *pbeth.Block) {
-				trx := block.TransactionTraces[0]
-				call := trx.Calls[0]
-
-				require.Equal(t, 3, len(call.GasChanges))
-
-				// Before (deferred)
-				assert.Equal(t, pbeth.GasChange_REASON_INTRINSIC_GAS, call.GasChanges[0].Reason)
-
-				// During
-				assert.Equal(t, pbeth.GasChange_REASON_STATE_COLD_ACCESS, call.GasChanges[1].Reason)
-
-				// After (deferred)
-				assert.Equal(t, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION, call.GasChanges[2].Reason)
-			})
-	})
-
-	// =============================================================================
 	// Mixed State Changes - Complex Scenarios
 	// =============================================================================
 
@@ -345,7 +271,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
 			NonceChange(AliceAddr, 0, 1).
 			CodeChange(AliceAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
-			GasChange(50000, 29000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			StartCall(AliceAddr, BobAddr, bigInt(100), 29000, []byte{}).
 			EndCall([]byte{}, 29000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
@@ -357,7 +282,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 				assert.Equal(t, 1, len(call.BalanceChanges))
 				assert.Equal(t, 1, len(call.NonceChanges))
 				assert.Equal(t, 1, len(call.CodeChanges))
-				assert.Equal(t, 1, len(call.GasChanges))
 			})
 	})
 
@@ -373,7 +297,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			BalanceChange(AliceAddr, bigInt(790), bigInt(800), pbeth.BalanceChange_REASON_GAS_REFUND).
 			NonceChange(CharlieAddr, 5, 6).
 			CodeChange(CharlieAddr, hashBytes(oldCode), hashBytes(newCode), oldCode, newCode).
-			GasChange(0, 5000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
 			EndBlockTrx(successReceipt(16000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -383,7 +306,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 				assert.Equal(t, 1, len(call.BalanceChanges))
 				assert.Equal(t, 1, len(call.NonceChanges))
 				assert.Equal(t, 1, len(call.CodeChanges))
-				assert.Equal(t, 1, len(call.GasChanges))
 			})
 	})
 
@@ -402,20 +324,17 @@ func TestTracer_DeferredCallState(t *testing.T) {
 			BalanceChange(AliceAddr, bigInt(1000), bigInt(790), pbeth.BalanceChange_REASON_GAS_BUY).
 			NonceChange(AliceAddr, 0, 1).
 			CodeChange(AliceAddr, hashBytes(code1Old), hashBytes(code1New), code1Old, code1New).
-			GasChange(50000, 29000, pbeth.GasChange_REASON_INTRINSIC_GAS).
 			// === DURING ROOT CALL ===
 			StartCall(AliceAddr, BobAddr, bigInt(100), 29000, []byte{}).
 			BalanceChange(AliceAddr, bigInt(790), bigInt(690), pbeth.BalanceChange_REASON_TRANSFER).
 			BalanceChange(BobAddr, bigInt(500), bigInt(600), pbeth.BalanceChange_REASON_TRANSFER).
 			NonceChange(BobAddr, 0, 1).
 			CodeChange(BobAddr, hashBytes(code2Old), hashBytes(code2New), code2Old, code2New).
-			GasChange(29000, 8000, pbeth.GasChange_REASON_STATE_COLD_ACCESS).
 			EndCall([]byte{}, 8000).
 			// === AFTER ROOT CALL ===
 			BalanceChange(AliceAddr, bigInt(690), bigInt(700), pbeth.BalanceChange_REASON_GAS_REFUND).
 			NonceChange(CharlieAddr, 10, 11).
 			CodeChange(CharlieAddr, hashBytes(code3Old), hashBytes(code3New), code3Old, code3New).
-			GasChange(8000, 13000, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION).
 			EndBlockTrx(successReceipt(37000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
@@ -425,7 +344,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 				require.Equal(t, 4, len(call.BalanceChanges), "Should have 4 balance changes")
 				require.Equal(t, 3, len(call.NonceChanges), "Should have 3 nonce changes")
 				require.Equal(t, 3, len(call.CodeChanges), "Should have 3 code changes")
-				require.Equal(t, 3, len(call.GasChanges), "Should have 3 gas changes")
 
 				// Verify ordering: before (deferred) -> during -> after (deferred)
 				// Balance changes
@@ -443,11 +361,6 @@ func TestTracer_DeferredCallState(t *testing.T) {
 				assert.Equal(t, AliceAddr[:], call.CodeChanges[0].Address, "First code change should be Alice (before)")
 				assert.Equal(t, BobAddr[:], call.CodeChanges[1].Address, "Second code change should be Bob (during)")
 				assert.Equal(t, CharlieAddr[:], call.CodeChanges[2].Address, "Third code change should be Charlie (after)")
-
-				// Gas changes
-				assert.Equal(t, pbeth.GasChange_REASON_INTRINSIC_GAS, call.GasChanges[0].Reason, "First gas change should be intrinsic (before)")
-				assert.Equal(t, pbeth.GasChange_REASON_STATE_COLD_ACCESS, call.GasChanges[1].Reason, "Second gas change should be call (during)")
-				assert.Equal(t, pbeth.GasChange_REASON_REFUND_AFTER_EXECUTION, call.GasChanges[2].Reason, "Third gas change should be refund (after)")
 			})
 	})
 }

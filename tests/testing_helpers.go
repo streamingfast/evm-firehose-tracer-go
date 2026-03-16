@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"math/big"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go/v4"
+	firehose "github.com/streamingfast/evm-firehose-tracer-go/v5"
 
 	eth "github.com/streamingfast/eth-go"
 )

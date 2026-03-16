@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	firehose "github.com/streamingfast/evm-firehose-tracer-go/v4"
+	firehose "github.com/streamingfast/evm-firehose-tracer-go/v5"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -354,11 +354,6 @@ func collectCallOrdinals(call *pbeth.Call) []uint64 {
 
 	// Collect from storage changes
 	for _, change := range call.StorageChanges {
-		ordinals = append(ordinals, change.Ordinal)
-	}
-
-	// Collect from gas changes
-	for _, change := range call.GasChanges {
 		ordinals = append(ordinals, change.Ordinal)
 	}
 
