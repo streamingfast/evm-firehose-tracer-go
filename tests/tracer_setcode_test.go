@@ -313,6 +313,181 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			})
 	})
 
+	t.Run("wrong_address_nonce_change_discarded", func(t *testing.T) {
+		// Nonce change exists for the right nonce range (0→1) but for a DIFFERENT address.
+		// This tests the bytes.Equal(change.Address, forAddress) condition.
+		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
+		require.NoError(t, err)
+
+		txEvent := new(firehose.TxEventBuilder).
+			Defaults().
+			Type(firehose.TxTypeSetCode).
+			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+			Build()
+
+		tester := NewTracerTester(t).StartBlock()
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
+
+		// Nonce change is for BobAddr (0→1), but auth authority is AliceAddr
+		tester.NonceChange(BobAddr, 0, 1)
+
+		tester.
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			EndCall([]byte{}, 21000).
+			EndBlockTrx(successReceipt(21000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.Equal(t, 1, len(trx.SetCodeAuthorizations))
+
+				authResult := trx.SetCodeAuthorizations[0]
+				assert.Equal(t, AliceAddr[:], authResult.Authority, "Authority should be Alice")
+				assert.True(t, authResult.Discarded, "Authorization should be discarded: nonce change is for wrong address")
+			})
+	})
+
+	t.Run("wrong_new_value_nonce_change_discarded", func(t *testing.T) {
+		// Nonce change has matching address and OldValue but NewValue ≠ nonce+1.
+		// This tests the change.NewValue == nonce+1 condition.
+		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
+		require.NoError(t, err)
+
+		txEvent := new(firehose.TxEventBuilder).
+			Defaults().
+			Type(firehose.TxTypeSetCode).
+			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+			Build()
+
+		tester := NewTracerTester(t).StartBlock()
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
+
+		// OldValue=0 matches auth.Nonce=0, but NewValue=5 ≠ 0+1
+		tester.NonceChange(AliceAddr, 0, 5)
+
+		tester.
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			EndCall([]byte{}, 21000).
+			EndBlockTrx(successReceipt(21000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.Equal(t, 1, len(trx.SetCodeAuthorizations))
+
+				authResult := trx.SetCodeAuthorizations[0]
+				assert.Equal(t, AliceAddr[:], authResult.Authority, "Authority should be Alice")
+				assert.True(t, authResult.Discarded, "Authorization should be discarded: new nonce value is not nonce+1")
+			})
+	})
+
+	t.Run("multiple_same_authority_different_nonces_all_valid", func(t *testing.T) {
+		// Two authorizations from Alice with different nonces (0 and 1), each with
+		// a matching nonce change. Both should be valid (not discarded).
+		// This tests that each nonce change is consumed separately (usedNonceChange map).
+		auth1, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
+		require.NoError(t, err)
+
+		auth2, err := firehose.SignSetCodeAuth(AliceKey, 1, BobAddr, 1)
+		require.NoError(t, err)
+
+		txEvent := new(firehose.TxEventBuilder).
+			Defaults().
+			Type(firehose.TxTypeSetCode).
+			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth1, auth2}).
+			Build()
+
+		tester := NewTracerTester(t).StartBlock()
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
+
+		// Matching nonce changes for both authorizations
+		tester.NonceChange(AliceAddr, 0, 1) // matches auth1 (nonce=0)
+		tester.NonceChange(AliceAddr, 1, 2) // matches auth2 (nonce=1)
+
+		tester.
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			EndCall([]byte{}, 21000).
+			EndBlockTrx(successReceipt(21000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.Equal(t, 2, len(trx.SetCodeAuthorizations))
+
+				auth1Result := trx.SetCodeAuthorizations[0]
+				assert.Equal(t, AliceAddr[:], auth1Result.Authority)
+				assert.False(t, auth1Result.Discarded, "auth1 should NOT be discarded: matching nonce change 0→1 present")
+
+				auth2Result := trx.SetCodeAuthorizations[1]
+				assert.Equal(t, AliceAddr[:], auth2Result.Authority)
+				assert.False(t, auth2Result.Discarded, "auth2 should NOT be discarded: matching nonce change 1→2 present")
+			})
+	})
+
+	t.Run("all_empty_authority_all_discarded", func(t *testing.T) {
+		// Multiple authorizations all with invalid signatures → all discarded immediately.
+		// This tests the len(auth.Authority) == 0 early-discard path for multiple auths.
+		auth1, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
+		require.NoError(t, err)
+		auth1.V = auth1.V + 10 // corrupt signature
+
+		auth2, err := firehose.SignSetCodeAuth(BobKey, 1, CharlieAddr, 0)
+		require.NoError(t, err)
+		auth2.V = auth2.V + 10 // corrupt signature
+
+		txEvent := new(firehose.TxEventBuilder).
+			Defaults().
+			Type(firehose.TxTypeSetCode).
+			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth1, auth2}).
+			Build()
+
+		tester := NewTracerTester(t).StartBlock()
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
+
+		// Even if nonce changes are present, empty-authority auths are discarded
+		tester.NonceChange(AliceAddr, 0, 1)
+		tester.NonceChange(BobAddr, 0, 1)
+
+		tester.
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			EndCall([]byte{}, 21000).
+			EndBlockTrx(successReceipt(21000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.Equal(t, 2, len(trx.SetCodeAuthorizations))
+
+				for i, authResult := range trx.SetCodeAuthorizations {
+					assert.Empty(t, authResult.Authority, "auth[%d]: authority should be empty (invalid signature)", i)
+					assert.True(t, authResult.Discarded, "auth[%d]: should be discarded (empty authority)", i)
+				}
+			})
+	})
+
+	t.Run("nonce_change_during_call_matches_auth", func(t *testing.T) {
+		// Nonce change happens DURING the root call execution (not in deferred state before
+		// the call). The method must still find it in rootCall.NonceChanges.
+		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
+		require.NoError(t, err)
+
+		txEvent := new(firehose.TxEventBuilder).
+			Defaults().
+			Type(firehose.TxTypeSetCode).
+			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+			Build()
+
+		tester := NewTracerTester(t).StartBlock()
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
+
+		// Nonce change happens DURING the call (not deferred before it)
+		tester.StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{})
+		tester.NonceChange(AliceAddr, 0, 1)
+		tester.
+			EndCall([]byte{}, 21000).
+			EndBlockTrx(successReceipt(21000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.Equal(t, 1, len(trx.SetCodeAuthorizations))
+
+				authResult := trx.SetCodeAuthorizations[0]
+				assert.Equal(t, AliceAddr[:], authResult.Authority, "Authority should be Alice")
+				assert.False(t, authResult.Discarded, "Authorization should NOT be discarded: nonce change present in root call")
+			})
+	})
+
 	t.Run("setcode_with_access_list", func(t *testing.T) {
 		// SetCode transaction can include an access list (EIP-1559 feature)
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)
