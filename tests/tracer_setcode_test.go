@@ -488,6 +488,49 @@ func TestTracer_SetCodeAuthorization(t *testing.T) {
 			})
 	})
 
+	t.Run("zero_r_s_signature_serializes_as_empty", func(t *testing.T) {
+		// Production (native tracer) behavior: when R and S are zero (e.g., an
+		// all-zero/unset signature), they must serialize as empty bytes ("" in JSON),
+		// not as 32 zero bytes ("AAAA...AAA=" in base64).
+		//
+		// The native tracer uses big.Int.Bytes() which returns []byte{} for zero, then
+		// normalizeSignaturePoint maps that to nil. The shared tracer must do the same.
+		auth := firehose.SetCodeAuthorization{
+			ChainID: [32]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+			Address: CharlieAddr,
+			Nonce:   0,
+			V:       0,
+			R:       [32]byte{}, // all zeros
+			S:       [32]byte{}, // all zeros
+		}
+
+		txEvent := new(firehose.TxEventBuilder).
+			Defaults().
+			Type(firehose.TxTypeSetCode).
+			SetCodeAuthorizations([]firehose.SetCodeAuthorization{auth}).
+			Build()
+
+		tester := NewTracerTester(t).StartBlock()
+		tester.tracer.OnTxStart(txEvent, tester.mockStateDB)
+
+		tester.
+			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
+			EndCall([]byte{}, 21000).
+			EndBlockTrx(successReceipt(21000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				trx := block.TransactionTraces[0]
+				require.Equal(t, 1, len(trx.SetCodeAuthorizations))
+
+				authResult := trx.SetCodeAuthorizations[0]
+
+				// R and S must be nil (empty), not 32 zero bytes.
+				// This matches production native tracer behavior where zero big.Int.Bytes()
+				// → empty slice → normalizeSignaturePoint → nil.
+				assert.Nil(t, authResult.R, "R should be nil (not 32 zero bytes) for zero signature")
+				assert.Nil(t, authResult.S, "S should be nil (not 32 zero bytes) for zero signature")
+			})
+	})
+
 	t.Run("setcode_with_access_list", func(t *testing.T) {
 		// SetCode transaction can include an access list (EIP-1559 feature)
 		auth, err := firehose.SignSetCodeAuth(AliceKey, 1, CharlieAddr, 0)

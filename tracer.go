@@ -629,8 +629,8 @@ func (t *Tracer) OnTxStart(event TxEvent, stateReader StateReader) {
 				Address: auth.Address[:],
 				Nonce:   auth.Nonce,
 				V:       auth.V,
-				R:       auth.R[:],
-				S:       auth.S[:],
+				R:       normalizeSignaturePoint(auth.R[:]),
+				S:       normalizeSignaturePoint(auth.S[:]),
 			}
 
 			// Recover authority (signer address) from signature

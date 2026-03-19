@@ -14,6 +14,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * Gas changes tracking (`OnGasChange`, per-opcode gas recording) is no longer supported. The `GasChanges` field on calls will always be empty. Consumers that relied on this data must migrate to alternative gas accounting.
 * Remove `Config.SkipWithdrawals` flag (see above).
 
+## v4.0.4
+
+### Fixed
+
+* SetCode authorization `r` and `s` signature fields now serialize as empty string (`""`) when zero, matching production behavior of the native tracer.
+
 ## v4.0.3
 
 ### Added
