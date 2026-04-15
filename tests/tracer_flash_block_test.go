@@ -241,7 +241,7 @@ func TestFlashBlock_PersistsOnRegularBlock(t *testing.T) {
 	tracer.SnapshotFlashBlockForNextIteration()
 	tracer.OnBlockEnd(nil)
 
-	// Snapshot is set; blockIsFlashBlock reset
+	// Snapshot is set; IsFlashBlock is false between blocks
 	require.True(t, tracer.HasFlashBlockSnapshot())
 	require.False(t, tracer.IsFlashBlock())
 
@@ -251,7 +251,6 @@ func TestFlashBlock_PersistsOnRegularBlock(t *testing.T) {
 
 	// Snapshot must NOT be cleared by a regular block
 	assert.True(t, tracer.HasFlashBlockSnapshot(), "snapshot should persist through regular block")
-	assert.Equal(t, uint64(1), tracer.GetFlashBlockIndex(), "flash block index should persist through regular block")
 
 	tracer.OnBlockEnd(nil)
 }
