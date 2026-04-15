@@ -16,6 +16,20 @@ import (
 type BlockEvent struct {
 	Block     BlockData
 	Finalized *FinalizedBlockRef
+
+	// FlashBlock is non-nil when this block is being processed as part of a flash block sequence.
+	// Flash blocks are partial blocks emitted incrementally (used by Optimism/Katana).
+	// Each iteration has a monotonically increasing Idx within the same block number.
+	FlashBlock *FlashBlockData
+}
+
+// FlashBlockData contains flash block sequence metadata.
+// Flash blocks are a mechanism used in Optimism/Katana where a single canonical block
+// is built incrementally across multiple "flash" iterations. Each iteration adds more
+// transactions to the block and is emitted as a partial block. The Idx field identifies
+// the iteration number and must be strictly increasing within a given block number.
+type FlashBlockData struct {
+	Idx uint64 // Flash block index, monotonically increasing within the same block number
 }
 
 // BlockData contains the minimal block data needed by the tracer
