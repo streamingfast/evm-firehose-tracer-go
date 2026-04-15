@@ -91,13 +91,28 @@ type Tracer struct {
 	// Chain-specific state (used via optional hooks)
 	// These fields are included in the shared Tracer to support chains that need them:
 	// - BNB: inSystemTx for system transaction tracking
-	// - Optimism/Katana: flashBlockIndex for flash block execution
+	// - Optimism/Katana: flash block execution via FlashBlock in BlockEvent
 	// - Polygon: State sync receipt handling
 	// They remain zero/nil if the hooks are never called.
-	flashBlockIndex int // Flash block index (Optimism/Katana)
+	flashBlockIndex           uint64              // Last flash block index seen within current block number; persists across resetBlock
+	blockIsFlashBlock         bool                // true if the current block is a flash block iteration
+	snapshotForNextFlashBlock *flashBlockSnapshot // Snapshot for the next flash block iteration; persists across resetBlock
 
 	// System calls tracking (used in some chains via OnSystemCallStart/End hooks)
 	systemCalls []*pbeth.Call
+}
+
+// flashBlockSnapshot holds the state of a flash block at a snapshot point in time.
+// It is used to restore state at the start of the next flash block iteration,
+// allowing each iteration to include all data from the previous snapshot point.
+type flashBlockSnapshot struct {
+	block             *pbeth.Block // The block at snapshot time (source for slice restoration)
+	txTracesLen       int          // Number of transaction traces at snapshot time
+	systemCallsLen    int          // Number of system calls at snapshot time
+	balanceChangesLen int          // Number of balance changes at snapshot time
+	codeChangesLen    int          // Number of code changes at snapshot time
+	ordinal           uint64       // Block ordinal value at snapshot time
+	flashIndex        uint64       // Flash block index at snapshot time (for validation)
 }
 
 // NewTracer creates a new Firehose tracer with the given configuration.
@@ -167,6 +182,12 @@ func (t *Tracer) resetBlock() {
 	t.blockReorderOrdinalSnapshot = 0
 	t.blockReorderOrdinalOnce = sync.Once{}
 	t.blockIsGenesis = false
+	t.blockIsFlashBlock = false
+	// Note: flashBlockIndex and snapshotForNextFlashBlock are intentionally NOT reset here.
+	// They persist across block boundaries so that:
+	// - flashBlockIndex can be validated against the next flash block's index
+	// - snapshotForNextFlashBlock can be used by the next flash block iteration
+	// Both are cleared only when the block number changes (handled in OnBlockStart).
 }
 
 // resetTransaction resets the transaction state and call state in one shot
@@ -320,9 +341,30 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 
 	block := event.Block
 
+	// Handle flash block sequencing
+	if event.FlashBlock != nil {
+		// If there is an existing snapshot, validate or discard it
+		if snap := t.snapshotForNextFlashBlock; snap != nil {
+			if snap.block.Number == block.Number {
+				// Same block number: flash block index must strictly advance
+				if event.FlashBlock.Idx <= snap.flashIndex {
+					panic(fmt.Errorf("flash block index not higher than previous: block=%d last_idx=%d new_idx=%d",
+						block.Number, snap.flashIndex, event.FlashBlock.Idx))
+				}
+			} else {
+				// Different block number: discard stale snapshot
+				t.snapshotForNextFlashBlock = nil
+			}
+		}
+
+		// Track the current flash block index
+		t.flashBlockIndex = event.FlashBlock.Idx
+		t.blockIsFlashBlock = true
+	}
+
 	// Compute block rules for this block (block-scoped fork flags)
 	t.blockRules = t.chainConfig.Rules(new(big.Int).SetUint64(block.Number), block.IsMerge, block.Time)
-	firehoseInfo("block start (number=%d hash=%x)", block.Number, block.Hash)
+	firehoseInfo("block start (number=%d hash=%x flash=%t)", block.Number, block.Hash, t.blockIsFlashBlock)
 
 	// Create protobuf block
 	t.block = &pbeth.Block{
@@ -331,6 +373,24 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 		Header: t.newBlockHeaderFromBlockData(block),
 		Ver:    5, // Protocol version 5
 		Size:   block.Size,
+	}
+
+	// Restore state from flash block snapshot when starting a flash block iteration
+	if t.blockIsFlashBlock {
+		if snap := t.snapshotForNextFlashBlock; snap != nil {
+			prevBlock := snap.block
+			t.block.TransactionTraces = append(t.block.TransactionTraces, prevBlock.TransactionTraces[:snap.txTracesLen]...)
+			if snap.systemCallsLen > 0 && prevBlock.SystemCalls != nil {
+				t.block.SystemCalls = append(t.block.SystemCalls, prevBlock.SystemCalls[:snap.systemCallsLen]...)
+			}
+			if snap.balanceChangesLen > 0 && prevBlock.BalanceChanges != nil {
+				t.block.BalanceChanges = append(t.block.BalanceChanges, prevBlock.BalanceChanges[:snap.balanceChangesLen]...)
+			}
+			if snap.codeChangesLen > 0 && prevBlock.CodeChanges != nil {
+				t.block.CodeChanges = append(t.block.CodeChanges, prevBlock.CodeChanges[:snap.codeChangesLen]...)
+			}
+			t.blockOrdinal.Restore(snap.ordinal)
+		}
 	}
 
 	// Add uncles
@@ -388,6 +448,12 @@ func (t *Tracer) OnBlockEnd(err error) {
 		// An error occurred, could have happened in transaction/call context
 		// We must not check if in trx/call, only check in block
 		t.ensureInBlock(0)
+
+		// Discard any flash block snapshot for the failed block to avoid using
+		// a corrupted partial state in the next iteration.
+		if t.blockIsFlashBlock {
+			t.snapshotForNextFlashBlock = nil
+		}
 	}
 
 	t.resetBlock()
@@ -413,6 +479,65 @@ func (t *Tracer) OnClose() {
 	if t.concurrentFlushQueue != nil {
 		t.concurrentFlushQueue.Close()
 	}
+}
+
+// SnapshotFlashBlockForNextIteration captures the current state of the flash block
+// at a specific point in processing (typically after regular transactions but before
+// termination system calls). The snapshot records the lengths of all slices that may
+// grow during the rest of block processing.
+//
+// When the next flash block iteration starts via OnBlockStart with a FlashBlock event,
+// this snapshot is used to restore the block to the captured state, so that the next
+// iteration inherits exactly the transactions and state changes up to the snapshot point.
+//
+// This method has no effect if the current block is not a flash block.
+//
+// Example usage (from chain-specific code in processor.go):
+//
+//	// After processing regular transactions, before EIP-6110/7002/7251 system calls:
+//	tracer.SnapshotFlashBlockForNextIteration()
+func (t *Tracer) SnapshotFlashBlockForNextIteration() {
+	if !t.blockIsFlashBlock {
+		return
+	}
+
+	t.snapshotForNextFlashBlock = &flashBlockSnapshot{
+		block:             t.block,
+		txTracesLen:       len(t.block.TransactionTraces),
+		systemCallsLen:    len(t.block.SystemCalls),
+		balanceChangesLen: len(t.block.BalanceChanges),
+		codeChangesLen:    len(t.block.CodeChanges),
+		ordinal:           t.blockOrdinal.Peek(),
+		flashIndex:        t.flashBlockIndex,
+	}
+
+	firehoseInfo("flash block snapshot created (number=%d tx_count=%d system_calls=%d balance_changes=%d code_changes=%d flash_index=%d ordinal=%d)",
+		t.block.Number,
+		t.snapshotForNextFlashBlock.txTracesLen,
+		t.snapshotForNextFlashBlock.systemCallsLen,
+		t.snapshotForNextFlashBlock.balanceChangesLen,
+		t.snapshotForNextFlashBlock.codeChangesLen,
+		t.snapshotForNextFlashBlock.flashIndex,
+		t.snapshotForNextFlashBlock.ordinal,
+	)
+}
+
+// IsFlashBlock returns true if the current block is a flash block iteration.
+func (t *Tracer) IsFlashBlock() bool {
+	return t.blockIsFlashBlock
+}
+
+// GetFlashBlockIndex returns the flash block index of the last flash block processed.
+// The value persists across regular (non-flash) blocks so it can be used to validate
+// that new flash block indices are always strictly increasing.
+func (t *Tracer) GetFlashBlockIndex() uint64 {
+	return t.flashBlockIndex
+}
+
+// HasFlashBlockSnapshot returns true if a flash block snapshot is available for the
+// next flash block iteration.
+func (t *Tracer) HasFlashBlockSnapshot() bool {
+	return t.snapshotForNextFlashBlock != nil
 }
 
 // ============================================================================

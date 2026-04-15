@@ -235,6 +235,28 @@ func (s *TracerTester) StartBlock() *TracerTester {
 	return s
 }
 
+// StartFlashBlock starts a flash block with the given flash block index.
+// This uses the same block data as TestBlock but adds FlashBlock metadata.
+// The idx must be strictly greater than the previous flash block index for the same block number.
+func (s *TracerTester) StartFlashBlock(idx uint64) *TracerTester {
+	event := firehose.BlockEvent{
+		Block: TestBlock.Block,
+		FlashBlock: &firehose.FlashBlockData{
+			Idx: idx,
+		},
+	}
+	s.tracer.OnBlockStart(event)
+	s.blockLogIndex = 0 // Reset log counter for new block
+	return s
+}
+
+// SnapshotFlashBlock captures the current flash block state for use in the next iteration.
+// This is typically called after regular transactions but before termination system calls.
+func (s *TracerTester) SnapshotFlashBlock() *TracerTester {
+	s.tracer.SnapshotFlashBlockForNextIteration()
+	return s
+}
+
 // StartBlockTrx starts a block and a transaction
 func (s *TracerTester) StartBlockTrx(tx firehose.TxEvent) *TracerTester {
 	s.tracer.OnBlockStart(TestBlock)

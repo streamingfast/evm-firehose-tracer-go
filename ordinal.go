@@ -27,3 +27,9 @@ func (o *Ordinal) Set(value uint64) {
 func (o *Ordinal) Reset() {
 	o.value.Store(0)
 }
+
+// Restore restores the ordinal to a previously saved value.
+// This is the counterpart to Peek/Save; used in flash block snapshot restoration.
+func (o *Ordinal) Restore(value uint64) {
+	o.value.Store(value)
+}
