@@ -348,7 +348,7 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 			if snap.block.Number == block.Number {
 				// Same block number: flash block index must strictly advance
 				if event.FlashBlock.Idx <= snap.flashIndex {
-					panic(fmt.Errorf("flash block index not higher than previous: block=%d last_idx=%d new_idx=%d",
+					panic(fmt.Errorf("flash block index must be strictly greater than previous: block=%d last_idx=%d new_idx=%d",
 						block.Number, snap.flashIndex, event.FlashBlock.Idx))
 				}
 			} else {
@@ -364,7 +364,7 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 
 	// Compute block rules for this block (block-scoped fork flags)
 	t.blockRules = t.chainConfig.Rules(new(big.Int).SetUint64(block.Number), block.IsMerge, block.Time)
-	firehoseInfo("block start (number=%d hash=%x flash=%t)", block.Number, block.Hash, t.blockIsFlashBlock)
+	firehoseInfo("block start (number=%d hash=%x flash_block=%t has_snapshot=%t)", block.Number, block.Hash, t.blockIsFlashBlock, t.snapshotForNextFlashBlock != nil)
 
 	// Create protobuf block
 	t.block = &pbeth.Block{
