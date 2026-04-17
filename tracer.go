@@ -22,7 +22,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const ProtocolVersion = "3.0"
+const ProtocolVersion = "3.1"
 
 // VM error messages that indicate reverted state
 // These match the error strings from go-ethereum/core/vm/errors.go
@@ -99,6 +99,7 @@ type Tracer struct {
 	// block's index when processing a flash block iteration. The pointer persists across
 	// resetBlock so the previous index can be validated when the next flash block starts.
 	flashBlockIndex           *uint64             // nil = not a flash block; non-nil = current flash block index; persists across resetBlock
+	flashBlockIsFinal         bool                // true when current flash block is the final iteration for its block number
 	snapshotForNextFlashBlock *flashBlockSnapshot // Snapshot for the next flash block iteration; persists across resetBlock
 
 	// System calls tracking (used in some chains via OnSystemCallStart/End hooks)
@@ -155,8 +156,8 @@ func NewTracer(config *Config) *Tracer {
 	if config.EnableConcurrentFlushing && config.ConcurrentBufferSize > 0 {
 		tracer.concurrentFlushQueue = NewConcurrentFlushQueue(
 			config.ConcurrentBufferSize,
-			func(block *pbeth.Block) {
-				bytes, err := tracer.printBlockToFirehose(block)
+			func(out *blockOutput) {
+				bytes, err := tracer.printBlockToFirehose(out)
 				if err == nil {
 					tracer.flushToFirehose(bytes)
 				}
@@ -192,6 +193,7 @@ func (t *Tracer) resetBlock() {
 	// the next flash block iteration picks it up or a new block number discards it
 	// (handled in handleFlashBlockStart).
 	t.flashBlockIndex = nil
+	t.flashBlockIsFinal = false
 }
 
 // resetTransaction resets the transaction state and call state in one shot
@@ -419,6 +421,7 @@ func (t *Tracer) handleFlashBlockStart(fb *FlashBlockData, blockNumber uint64) {
 	// Store the current flash block index (non-nil pointer signals "is flash block")
 	idx := fb.Idx
 	t.flashBlockIndex = &idx
+	t.flashBlockIsFinal = fb.IsFinal
 }
 
 // restoreFlashBlockSnapshot restores block state from the snapshot taken in the previous
@@ -458,11 +461,18 @@ func (t *Tracer) OnBlockEnd(err error) {
 		// Validate state: Must be in block and not in transaction
 		t.ensureInBlockAndNotInTrx()
 
+		// Capture per-block output context BEFORE resetBlock clears flash state.
+		out := &blockOutput{
+			block:                  t.block,
+			libNum:                 computeLibNum(t.block.Number, t.blockFinality),
+			printedFlashBlockIndex: computePrintedFlashBlockIndex(t.flashBlockIndex, t.flashBlockIsFinal),
+		}
+
 		// Flush block to firehose
 		if t.concurrentFlushQueue != nil {
-			t.concurrentFlushQueue.Push(t.block)
+			t.concurrentFlushQueue.Push(out)
 		} else {
-			bytes, err := t.printBlockToFirehose(t.block)
+			bytes, err := t.printBlockToFirehose(out)
 			if err == nil {
 				t.flushToFirehose(bytes)
 			}

@@ -35,3 +35,8 @@ func (fs *FinalityStatus) SetLastFinalizedBlock(blockNumber uint64) {
 func (fs *FinalityStatus) LastFinalizedBlock() uint64 {
 	return fs.lastFinalizedBlockNumber
 }
+
+// IsEmpty returns true if no finalized block has been recorded yet.
+func (fs *FinalityStatus) IsEmpty() bool {
+	return fs.lastFinalizedBlockNumber == 0
+}

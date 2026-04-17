@@ -5,8 +5,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased (v5.0.0)
 
+### Added
+
+* `FlashBlockData.IsFinal` flag to mark the final flash block iteration for a block. When set, the emitted `FIRE BLOCK` line encodes the flash block index as `Idx + 1000` (partials 1..9 emit as 1..9, the final 10th partial emits as 1010), matching the Optimism Geth firehose tracer behavior.
+* `FinalityStatus.IsEmpty()` method.
+
 ### Changed
 
+* `FIRE BLOCK` output line now includes a flash block index slot and a computed `lib_num`. New format: `FIRE BLOCK <block_num> <flash_block_idx> <block_hash> <prev_num> <prev_hash> <lib_num> <timestamp_unix_nano> <payload_base64>`. `flash_block_idx` is `0` for non-flash blocks. `lib_num` is derived from the current `FinalityStatus` (falling back to `max(block_num-200, 0)` when no finality is known, and always capped to no more than 200 blocks behind `block_num`).
 * Block withdrawals are now always recorded. The `Config.SkipWithdrawals` flag has been removed; consumers that previously relied on it to suppress withdrawals should handle filtering on their side if needed.
 
 ### Removed

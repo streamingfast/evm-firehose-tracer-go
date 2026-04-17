@@ -753,12 +753,12 @@ func ParseFirehoseBlocks(t *testing.T, tag string, buffer *bytes.Buffer) []*pbet
 		if strings.HasPrefix(line, "FIRE BLOCK ") {
 			require.True(t, initSeen, "For %s: FIRE INIT must appear before FIRE BLOCK", tag)
 
-			// FIRE BLOCK <block_num> <block_hash> <parent_num> <parent_hash> <lib_num> <timestamp_unix_nano> <payload_base64>
-			parts := strings.SplitN(line, " ", 9)
-			require.GreaterOrEqual(t, len(parts), 9, "For %s: FIRE BLOCK line should have 9 parts", tag)
+			// FIRE BLOCK <block_num> <flash_block_idx> <block_hash> <parent_num> <parent_hash> <lib_num> <timestamp_unix_nano> <payload_base64>
+			parts := strings.SplitN(line, " ", 10)
+			require.GreaterOrEqual(t, len(parts), 10, "For %s: FIRE BLOCK line should have 10 parts", tag)
 
 			// Extract base64-encoded payload (last field)
-			payloadBase64 := parts[8]
+			payloadBase64 := parts[9]
 
 			// Decode base64
 			payloadBytes, err := base64.StdEncoding.DecodeString(payloadBase64)

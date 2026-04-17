@@ -30,6 +30,12 @@ type BlockEvent struct {
 // the iteration number and must be strictly increasing within a given block number.
 type FlashBlockData struct {
 	Idx uint64 // Flash block index, monotonically increasing within the same block number
+
+	// IsFinal is true when this is the final flash block iteration for the block number.
+	// When true, the emitted FIRE BLOCK line encodes the index as Idx + 1000 (e.g. partial
+	// indices 1..9 emit as 1..9, the final 10th partial emits as 1010), matching the
+	// Optimism Geth firehose tracer behavior.
+	IsFinal bool
 }
 
 // BlockData contains the minimal block data needed by the tracer
@@ -73,6 +79,10 @@ type BlockData struct {
 	// List of transaction indexes that are dependent on each other in the block
 	// Used by Polygon's parallel execution engine (nil for non-Polygon chains)
 	TxDependency [][]uint64
+
+	// SlotNumber was added by EIP-7843 and is ignored in legacy headers, it is scheduled to
+	// be added in Amsterdam hard fork.
+	SlotNumber *uint64
 }
 
 // UncleData contains uncle block header data
