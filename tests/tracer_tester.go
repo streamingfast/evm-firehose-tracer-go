@@ -713,6 +713,25 @@ func (s *TracerTester) Reset() *TracerTester {
 	return s
 }
 
+// FirehoseBlockEntry holds a parsed FIRE BLOCK line: the decoded protobuf block
+// together with every header field from the wire line.
+//
+// Wire format:
+//
+//	FIRE BLOCK <block_num> <flash_block_idx> <block_hash> <prev_num> <prev_hash> <lib_num> <timestamp_unix_nano> <payload_base64>
+type FirehoseBlockEntry struct {
+	Block *pbeth.Block
+
+	// Header fields parsed from the FIRE BLOCK line (not in the protobuf).
+	BlockNum      uint64
+	FlashBlockIdx uint64
+	BlockHash     string
+	PrevNum       uint64
+	PrevHash      string
+	LibNum        uint64
+	TimestampNano int64
+}
+
 // ParseFirehoseBlock parses a single block from FIRE BLOCK output format
 // This is a convenience wrapper around ParseFirehoseBlocks that returns the first block
 func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.Block {
@@ -721,13 +740,30 @@ func ParseFirehoseBlock(t *testing.T, tag string, buffer *bytes.Buffer) *pbeth.B
 	return blocks[0]
 }
 
+// ParseFirehoseBlockEntries parses all blocks from FIRE BLOCK output and returns
+// full entries including wire-level header fields (LibNum, FlashBlockIdx, etc.).
+func ParseFirehoseBlockEntries(t *testing.T, tag string, buffer *bytes.Buffer) []FirehoseBlockEntry {
+	return parseFirehoseOutput(t, tag, buffer)
+}
+
 // ParseFirehoseBlocks parses all blocks from FIRE BLOCK output format
 // Returns a slice of blocks in the order they appear in the output
 func ParseFirehoseBlocks(t *testing.T, tag string, buffer *bytes.Buffer) []*pbeth.Block {
+	entries := parseFirehoseOutput(t, tag, buffer)
+	blocks := make([]*pbeth.Block, len(entries))
+	for i, e := range entries {
+		blocks[i] = e.Block
+	}
+	return blocks
+}
+
+// parseFirehoseOutput is the shared parser for FIRE BLOCK output. It returns
+// full entries including wire-level header fields.
+func parseFirehoseOutput(t *testing.T, tag string, buffer *bytes.Buffer) []FirehoseBlockEntry {
 	scanner := bufio.NewScanner(buffer)
 
 	var initSeen bool
-	var blocks []*pbeth.Block
+	var entries []FirehoseBlockEntry
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -757,6 +793,29 @@ func ParseFirehoseBlocks(t *testing.T, tag string, buffer *bytes.Buffer) []*pbet
 			parts := strings.SplitN(line, " ", 10)
 			require.GreaterOrEqual(t, len(parts), 10, "For %s: FIRE BLOCK line should have 10 parts", tag)
 
+			// Parse all header fields:
+			// parts[2]=block_num  parts[3]=flash_block_idx  parts[4]=block_hash
+			// parts[5]=prev_num   parts[6]=prev_hash        parts[7]=lib_num
+			// parts[8]=timestamp  parts[9]=payload_base64
+			blockNum, err := strconv.ParseUint(parts[2], 10, 64)
+			require.NoError(t, err, "For %s: parse block_num from FIRE BLOCK header", tag)
+
+			flashBlockIdx, err := strconv.ParseUint(parts[3], 10, 64)
+			require.NoError(t, err, "For %s: parse flash_block_idx from FIRE BLOCK header", tag)
+
+			blockHash := parts[4]
+
+			prevNum, err := strconv.ParseUint(parts[5], 10, 64)
+			require.NoError(t, err, "For %s: parse prev_num from FIRE BLOCK header", tag)
+
+			prevHash := parts[6]
+
+			libNum, err := strconv.ParseUint(parts[7], 10, 64)
+			require.NoError(t, err, "For %s: parse lib_num from FIRE BLOCK header", tag)
+
+			timestampNano, err := strconv.ParseInt(parts[8], 10, 64)
+			require.NoError(t, err, "For %s: parse timestamp from FIRE BLOCK header", tag)
+
 			// Extract base64-encoded payload (last field)
 			payloadBase64 := parts[9]
 
@@ -769,17 +828,24 @@ func ParseFirehoseBlocks(t *testing.T, tag string, buffer *bytes.Buffer) []*pbet
 			err = proto.Unmarshal(payloadBytes, block)
 			require.NoError(t, err, "For %s: protobuf unmarshal", tag)
 
-			// Validate fields match (for integrity)
-			blockNum, err := strconv.ParseUint(parts[2], 10, 64)
-			require.NoError(t, err, "For %s: parse block number from FIRE BLOCK header", tag)
+			// Validate block_num matches protobuf
 			require.Equal(t, blockNum, block.Number, "For %s: block number in header should match protobuf", tag)
 
-			blocks = append(blocks, block)
+			entries = append(entries, FirehoseBlockEntry{
+				Block:         block,
+				BlockNum:      blockNum,
+				FlashBlockIdx: flashBlockIdx,
+				BlockHash:     blockHash,
+				PrevNum:       prevNum,
+				PrevHash:      prevHash,
+				LibNum:        libNum,
+				TimestampNano: timestampNano,
+			})
 		}
 	}
 
 	require.NoError(t, scanner.Err(), "For %s: reading buffer", tag)
-	return blocks
+	return entries
 }
 
 // mockStateDB is a minimal StateDB stub for testing

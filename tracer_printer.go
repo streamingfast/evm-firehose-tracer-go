@@ -84,10 +84,10 @@ func (t *Tracer) printBlockToFirehose(out *blockOutput) ([]byte, error) {
 
 	encoder := base64.NewEncoder(base64.StdEncoding, buf)
 	if _, err := encoder.Write(marshalled); err != nil {
-		return nil, fmt.Errorf("write to base64 encoder should have been infaillible: %w", err)
+		return nil, fmt.Errorf("write to base64 encoder should have been infallible: %w", err)
 	}
 	if err := encoder.Close(); err != nil {
-		return nil, fmt.Errorf("closing base64 encoder should have been infaillible: %w", err)
+		return nil, fmt.Errorf("closing base64 encoder should have been infallible: %w", err)
 	}
 
 	buf.WriteString("\n")
