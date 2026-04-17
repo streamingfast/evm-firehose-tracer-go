@@ -87,7 +87,8 @@ func TestTracer_Suicide(t *testing.T) {
 	})
 
 	t.Run("suicide_with_zero_balance", func(t *testing.T) {
-		// Contract with zero balance suicides
+		// Contract with zero balance suicides — in v5 the 0→0 balance changes
+		// are skipped because the tracer now filters equivalent changes.
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartCall(AliceAddr, BobAddr, bigInt(0), 100000, []byte{}).
@@ -103,19 +104,8 @@ func TestTracer_Suicide(t *testing.T) {
 				assert.True(t, rootCall.Suicide)
 				assert.True(t, rootCall.ExecutedCode)
 
-				// Should still have balance changes (with nil values for zero)
-				balanceChanges := rootCall.BalanceChanges
-				assert.Equal(t, 2, len(balanceChanges))
-
-				withdraw := balanceChanges[0]
-				assert.Nil(t, withdraw.OldValue, "Zero balance should be nil")
-				assert.Nil(t, withdraw.NewValue, "Zero balance should be nil")
-				assert.Equal(t, pbeth.BalanceChange_REASON_SUICIDE_WITHDRAW, withdraw.Reason)
-
-				refund := balanceChanges[1]
-				assert.Nil(t, refund.OldValue, "Zero balance should be nil")
-				assert.Nil(t, refund.NewValue, "Zero balance should be nil")
-				assert.Equal(t, pbeth.BalanceChange_REASON_SUICIDE_REFUND, refund.Reason)
+				// v5: 0→0 balance changes are now skipped
+				assert.Equal(t, 0, len(rootCall.BalanceChanges), "Zero-to-zero balance changes should be skipped in v5")
 			})
 	})
 

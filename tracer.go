@@ -1488,6 +1488,11 @@ func (t *Tracer) OnBalanceChange(addr [20]byte, oldBalance, newBalance *big.Int,
 		return
 	}
 
+	// Skip no-op changes where old and new balances are equal
+	if bigIntEqual(oldBalance, newBalance) {
+		return
+	}
+
 	t.ensureInBlockOrTrx()
 
 	change := t.newBalanceChange("tracer", addr, oldBalance, newBalance, reason)
@@ -1528,6 +1533,10 @@ func (t *Tracer) newBalanceChange(tag string, addr [20]byte, oldValue, newValue 
 
 // OnNonceChange is called when an account nonce changes
 func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
+	if oldNonce == newNonce {
+		return
+	}
+
 	t.ensureInBlockAndInTrx()
 
 	activeCall := t.callStack.Peek()
@@ -1550,6 +1559,10 @@ func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
 // OnCodeChange is called when contract code changes
 // Note: Includes code hashes for proper tracking
 func (t *Tracer) OnCodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]byte, oldCode, newCode []byte) {
+	if prevCodeHash == newCodeHash {
+		return
+	}
+
 	firehoseDebug("code changed (address=%s prev_hash=%x new_hash=%x)",
 		shortAddressView(&addr), prevCodeHash, newCodeHash)
 
@@ -1594,6 +1607,10 @@ func (t *Tracer) newCodeChange(addr [20]byte, prevCodeHash [32]byte, oldCode []b
 
 // OnStorageChange is called when contract storage changes
 func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) {
+	if oldValue == newValue {
+		return
+	}
+
 	firehoseTrace("storage changed (address=%s key=%x, before=%x after=%x)",
 		shortAddressView(&addr), slot, oldValue, newValue)
 

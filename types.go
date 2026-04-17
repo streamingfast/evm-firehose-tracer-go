@@ -298,6 +298,21 @@ var BigIntOne = big.NewInt(1)
 
 func bigInt(i int64) *big.Int { return big.NewInt(i) }
 
+// bigIntEqual returns true if a and b represent the same value.
+// Both nil and zero are treated as equal.
+func bigIntEqual(a, b *big.Int) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil {
+		return b.Sign() == 0
+	}
+	if b == nil {
+		return a.Sign() == 0
+	}
+	return a.Cmp(b) == 0
+}
+
 // bigIntToProtobuf converts a big.Int to protobuf BigInt
 // Matches the semantics of firehoseBigIntFromNative in go-ethereum:
 // - Returns nil for both nil and zero values

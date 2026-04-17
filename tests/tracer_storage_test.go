@@ -156,31 +156,23 @@ func TestTracer_OnStorageChange(t *testing.T) {
 			})
 	})
 
-	t.Run("storage_change_no_change_recorded", func(t *testing.T) {
-		// Storage "changes" where oldValue == newValue ARE recorded (not filtered)
-		// This differs from gas changes which filter no-change cases
+	t.Run("storage_change_no_change_skipped", func(t *testing.T) {
+		// In v5, storage "changes" where oldValue == newValue are skipped to avoid
+		// recording equivalent state.
 		key := hash32(1)
 		value := hash32(100) // Same for old and new
 
 		NewTracerTester(t).
 			StartBlockTrx(TestLegacyTrx).
 			StartCall(AliceAddr, BobAddr, bigInt(100), 21000, []byte{}).
-			StorageChange(BobAddr, key, value, value). // No actual change
+			StorageChange(BobAddr, key, value, value). // No actual change — should be skipped
 			EndCall([]byte{}, 21000).
 			EndBlockTrx(successReceipt(21000), nil, nil).
 			Validate(func(block *pbeth.Block) {
 				trx := block.TransactionTraces[0]
 				call := trx.Calls[0]
 
-				// Native tracer records storage changes even when old==new
-				// This is different behavior from gas changes which filter no-changes
-				assert.Equal(t, 1, len(call.StorageChanges), "No-change storage updates should be recorded")
-				sc := call.StorageChanges[0]
-				assert.Equal(t, BobAddr[:], sc.Address)
-				assert.Equal(t, key[:], sc.Key)
-				assert.Equal(t, value[:], sc.OldValue)
-				assert.Equal(t, value[:], sc.NewValue)
-				assert.NotEqual(t, uint64(0), sc.Ordinal)
+				assert.Equal(t, 0, len(call.StorageChanges), "No-change storage updates should be skipped in v5")
 			})
 	})
 }
