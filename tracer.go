@@ -600,6 +600,7 @@ func (t *Tracer) newBlockHeaderFromBlockData(block BlockData) *pbeth.BlockHeader
 		MixHash:          block.MixDigest[:],
 		Nonce:            block.Nonce,
 		Hash:             block.Hash[:],
+		SlotNumber:       block.SlotNumber,
 	}
 
 	// BaseFee uses the same conversion as other BigInt fields

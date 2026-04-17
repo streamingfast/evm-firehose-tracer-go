@@ -208,12 +208,13 @@ func TestTracer_BlockHeader_EIPFields(t *testing.T) {
 	})
 
 	t.Run("all_eip_fields_combined", func(t *testing.T) {
-		// Test all EIP fields together (representing a post-Prague block)
+		// Test all EIP fields together (representing a post-Amsterdam block)
 		withdrawalsRoot := hash32(11111)
 		blobGasUsed := uint64(262144)
 		excessBlobGas := uint64(524288)
 		parentBeaconRoot := hash32(22222)
 		requestsHash := hash32(33333)
+		slotNumber := uint64(999)
 
 		blockEvent := firehose.BlockEvent{
 			Block: firehose.BlockData{
@@ -240,6 +241,7 @@ func TestTracer_BlockHeader_EIPFields(t *testing.T) {
 				ExcessBlobGas:    &excessBlobGas,
 				ParentBeaconRoot: &parentBeaconRoot,
 				RequestsHash:     &requestsHash,
+				SlotNumber:       &slotNumber,
 			},
 		}
 
@@ -262,6 +264,78 @@ func TestTracer_BlockHeader_EIPFields(t *testing.T) {
 
 				require.NotNil(t, block.Header.RequestsHash)
 				assert.Equal(t, requestsHash[:], block.Header.RequestsHash)
+
+				require.NotNil(t, block.Header.SlotNumber)
+				assert.Equal(t, slotNumber, *block.Header.SlotNumber)
+			})
+	})
+
+	t.Run("eip7843_slot_number", func(t *testing.T) {
+		// EIP-7843: Amsterdam slot number
+		slotNumber := uint64(42)
+
+		blockEvent := firehose.BlockEvent{
+			Block: firehose.BlockData{
+				Number:      100,
+				Hash:        hash32(1),
+				ParentHash:  hash32(2),
+				UncleHash:   hash32(3),
+				Coinbase:    AliceAddr,
+				Root:        hash32(4),
+				TxHash:      hash32(5),
+				ReceiptHash: hash32(6),
+				Bloom:       make([]byte, 256),
+				Difficulty:  bigInt(0),
+				GasLimit:    15_000_000,
+				GasUsed:     0,
+				Time:        1000,
+				Extra:       []byte{},
+				MixDigest:   hash32(7),
+				Nonce:       0,
+				BaseFee:     bigInt(1_000_000_000),
+				Size:        1024,
+				SlotNumber:  &slotNumber, // EIP-7843
+			},
+		}
+
+		NewTracerTester(t).
+			ValidateWithCustomBlock(blockEvent, func(block *pbeth.Block) {
+				require.NotNil(t, block.Header)
+				require.NotNil(t, block.Header.SlotNumber)
+				assert.Equal(t, slotNumber, *block.Header.SlotNumber)
+			})
+	})
+
+	t.Run("eip7843_slot_number_nil_pre_amsterdam", func(t *testing.T) {
+		// Pre-Amsterdam blocks should not have SlotNumber set
+		blockEvent := firehose.BlockEvent{
+			Block: firehose.BlockData{
+				Number:      100,
+				Hash:        hash32(1),
+				ParentHash:  hash32(2),
+				UncleHash:   hash32(3),
+				Coinbase:    AliceAddr,
+				Root:        hash32(4),
+				TxHash:      hash32(5),
+				ReceiptHash: hash32(6),
+				Bloom:       make([]byte, 256),
+				Difficulty:  bigInt(0),
+				GasLimit:    15_000_000,
+				GasUsed:     0,
+				Time:        1000,
+				Extra:       []byte{},
+				MixDigest:   hash32(7),
+				Nonce:       0,
+				BaseFee:     bigInt(1_000_000_000),
+				Size:        1024,
+				// SlotNumber is nil (pre-Amsterdam)
+			},
+		}
+
+		NewTracerTester(t).
+			ValidateWithCustomBlock(blockEvent, func(block *pbeth.Block) {
+				require.NotNil(t, block.Header)
+				assert.Nil(t, block.Header.SlotNumber, "pre-Amsterdam block should not have SlotNumber")
 			})
 	})
 
@@ -302,6 +376,7 @@ func TestTracer_BlockHeader_EIPFields(t *testing.T) {
 				assert.Nil(t, block.Header.ParentBeaconRoot)
 				assert.Nil(t, block.Header.RequestsHash)
 				assert.Nil(t, block.Header.TxDependency)
+				assert.Nil(t, block.Header.SlotNumber)
 			})
 	})
 }
