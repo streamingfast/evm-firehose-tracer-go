@@ -14,6 +14,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+* Trace/debug log calls in `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` are now emitted before early-return guards so they fire even for no-op (equal old/new value) invocations.
 * `OnBalanceChange`, `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` now skip recording when old and new values are equal. This avoids emitting no-op state changes in the block model.
 * `FIRE BLOCK` output line now includes a flash block index slot and a computed `lib_num`. New format: `FIRE BLOCK <block_num> <flash_block_idx> <block_hash> <prev_num> <prev_hash> <lib_num> <timestamp_unix_nano> <payload_base64>`. `flash_block_idx` is `0` for non-flash blocks. `lib_num` is derived from the current `FinalityStatus` (falling back to `max(block_num-200, 0)` when no finality is known, and always capped to no more than 200 blocks behind `block_num`).
 * Block withdrawals are now always recorded. The `Config.SkipWithdrawals` flag has been removed; consumers that previously relied on it to suppress withdrawals should handle filtering on their side if needed.

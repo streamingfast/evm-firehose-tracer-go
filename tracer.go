@@ -1484,6 +1484,9 @@ func (t *Tracer) callTypeToProto(ct CallType) pbeth.CallType {
 // OnBalanceChange is called when an account balance changes
 // Note: reason is pbeth.BalanceChange_Reason - the chain implementation converts from go-ethereum types
 func (t *Tracer) OnBalanceChange(addr [20]byte, oldBalance, newBalance *big.Int, reason pbeth.BalanceChange_Reason) {
+	firehoseTrace("balance changed (address=%s before=%d after=%d reason=%s)",
+		shortAddressView(&addr), oldBalance, newBalance, reason)
+
 	// Ignore unspecified reasons
 	if reason == pbeth.BalanceChange_REASON_UNKNOWN {
 		return
@@ -1496,7 +1499,13 @@ func (t *Tracer) OnBalanceChange(addr [20]byte, oldBalance, newBalance *big.Int,
 
 	t.ensureInBlockOrTrx()
 
-	change := t.newBalanceChange("tracer", addr, oldBalance, newBalance, reason)
+	change := &pbeth.BalanceChange{
+		Ordinal:  t.blockOrdinal.Next(),
+		Address:  addr[:],
+		OldValue: bigIntToProtobuf(oldBalance),
+		NewValue: bigIntToProtobuf(newBalance),
+		Reason:   reason,
+	}
 
 	// In transaction context - attach to call or defer
 	if t.transaction != nil {
@@ -1515,25 +1524,11 @@ func (t *Tracer) OnBalanceChange(addr [20]byte, oldBalance, newBalance *big.Int,
 	}
 }
 
-func (t *Tracer) newBalanceChange(tag string, addr [20]byte, oldValue, newValue *big.Int, reason pbeth.BalanceChange_Reason) *pbeth.BalanceChange {
-	firehoseTrace("balance changed (tag=%s address=%s before=%d after=%d reason=%s)",
-		tag, shortAddressView(&addr), oldValue, newValue, reason)
-
-	if reason == pbeth.BalanceChange_REASON_UNKNOWN {
-		panic(fmt.Errorf("received unknown balance change reason %s", reason))
-	}
-
-	return &pbeth.BalanceChange{
-		Ordinal:  t.blockOrdinal.Next(),
-		Address:  addr[:],
-		OldValue: bigIntToProtobuf(oldValue),
-		NewValue: bigIntToProtobuf(newValue),
-		Reason:   reason,
-	}
-}
-
 // OnNonceChange is called when an account nonce changes
 func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
+	firehoseDebug("nonce changed (address=%s prev_nonce=%d new_nonce=%d)",
+		shortAddressView(&addr), oldNonce, newNonce)
+
 	if oldNonce == newNonce {
 		return
 	}
@@ -1560,12 +1555,12 @@ func (t *Tracer) OnNonceChange(addr [20]byte, oldNonce, newNonce uint64) {
 // OnCodeChange is called when contract code changes
 // Note: Includes code hashes for proper tracking
 func (t *Tracer) OnCodeChange(addr [20]byte, prevCodeHash, newCodeHash [32]byte, oldCode, newCode []byte) {
+	firehoseDebug("code changed (address=%s prev_hash=%x new_hash=%x)",
+		shortAddressView(&addr), prevCodeHash, newCodeHash)
+
 	if prevCodeHash == newCodeHash {
 		return
 	}
-
-	firehoseDebug("code changed (address=%s prev_hash=%x new_hash=%x)",
-		shortAddressView(&addr), prevCodeHash, newCodeHash)
 
 	t.ensureInBlockOrTrx()
 
@@ -1608,12 +1603,12 @@ func (t *Tracer) newCodeChange(addr [20]byte, prevCodeHash [32]byte, oldCode []b
 
 // OnStorageChange is called when contract storage changes
 func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byte) {
+	firehoseTrace("storage changed (address=%s key=%x, before=%x after=%x)",
+		shortAddressView(&addr), slot, oldValue, newValue)
+
 	if oldValue == newValue {
 		return
 	}
-
-	firehoseTrace("storage changed (address=%s key=%x, before=%x after=%x)",
-		shortAddressView(&addr), slot, oldValue, newValue)
 
 	t.ensureInBlockAndInTrxAndInCall()
 
