@@ -7,6 +7,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+* `firehoseTraceFull` opcode logging: `OnOpcode` and `OnOpcodeFault` now emit trace-full-level log lines (enabled via `FIREHOSE_ETHEREUM_TRACER_LOG_LEVEL=trace_full`) including the opcode name, gas, cost, and error. All standard EVM opcodes (including Cancun additions) resolve to their human-readable name (e.g. `CALL`, `SSTORE`); unknown opcodes fall back to `0x??` hex.
 * `FlashBlockData.IsFinal` flag to mark the final flash block iteration for a block. When set, the emitted `FIRE BLOCK` line encodes the flash block index as `Idx + 1000` (partials 1..9 emit as 1..9, the final 10th partial emits as 1010), matching the Optimism Geth firehose tracer behavior.
 * `FinalityStatus.IsEmpty()` method.
 * EIP-7843 (Amsterdam): `BlockData.SlotNumber` field and `BlockHeader.SlotNumber` propagation.

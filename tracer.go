@@ -1686,6 +1686,8 @@ func (t *Tracer) OnSystemCallEnd() {
 
 // OnOpcode is called for each opcode (optional, for detailed tracing)
 func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, rData []byte, depth int, err error) {
+	firehoseTraceFull("on opcode (op=%s gas=%d cost=%d err=%s)", opCodeView(op), gas, cost, errorView(err))
+
 	activeCall := t.callStack.Peek()
 	if activeCall == nil {
 		return
@@ -1730,7 +1732,7 @@ func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 // This is called for opcodes that fault during execution (like invalid opcode, stack underflow, etc.)
 // The actual failure handling happens in OnCallExit when err != nil
 func (t *Tracer) OnOpcodeFault(pc uint64, op byte, gas, cost uint64, depth int, err error) {
-	firehoseDebug("opcode fault (pc=%d op=%d err=%v)", pc, op, err)
+	firehoseDebug("on opcode fault (op=%s gas=%d cost=%d err=%s)", opCodeView(op), gas, cost, errorView(err))
 
 	call := t.callStack.Peek()
 	if call == nil {
