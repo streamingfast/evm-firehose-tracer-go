@@ -16,6 +16,7 @@ type BlockEventBuilder struct {
 	difficulty *big.Int
 	size       uint64
 	bloom      []byte
+	finalized  *FinalizedBlockRef
 }
 
 // Number sets the block number
@@ -72,6 +73,13 @@ func (b *BlockEventBuilder) Bloom(bloom []byte) *BlockEventBuilder {
 	return b
 }
 
+// Finalized sets the finalized (last irreversible) block reference. This drives
+// the LIB number emitted in the "FIRE BLOCK" header.
+func (b *BlockEventBuilder) Finalized(number uint64, hash string) *BlockEventBuilder {
+	b.finalized = &FinalizedBlockRef{Number: number, Hash: hashFromHex(hash)}
+	return b
+}
+
 // Build creates a BlockEvent
 func (b *BlockEventBuilder) Build() BlockEvent {
 	// IsMerge is true when difficulty is 0 (PoS blocks)
@@ -91,7 +99,7 @@ func (b *BlockEventBuilder) Build() BlockEvent {
 			Size:       b.size,
 			Bloom:      b.bloom,
 		},
-		Finalized: nil,
+		Finalized: b.finalized,
 	}
 }
 

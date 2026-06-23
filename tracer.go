@@ -137,8 +137,8 @@ func NewTracer(config *Config) *Tracer {
 	if config.EnableConcurrentFlushing && config.ConcurrentBufferSize > 0 {
 		tracer.concurrentFlushQueue = NewConcurrentFlushQueue(
 			config.ConcurrentBufferSize,
-			func(block *pbeth.Block) {
-				bytes, err := tracer.printBlockToFirehose(block)
+			func(block *pbeth.Block, libNum uint64) {
+				bytes, err := tracer.printBlockToFirehose(block, libNum)
 				if err == nil {
 					tracer.flushToFirehose(bytes)
 				}
@@ -375,11 +375,14 @@ func (t *Tracer) OnBlockEnd(err error) {
 		// Validate state: Must be in block and not in transaction
 		t.ensureInBlockAndNotInTrx()
 
-		// Flush block to firehose
+		// Flush block to firehose. The LIB must be resolved here, before the
+		// finality state is reset by resetBlock() below (and, in the concurrent
+		// path, before the block is handed off to the flush worker).
+		libNum := t.blockFinality.LibNumForBlock(t.block.Number)
 		if t.concurrentFlushQueue != nil {
-			t.concurrentFlushQueue.Push(t.block)
+			t.concurrentFlushQueue.Push(t.block, libNum)
 		} else {
-			bytes, err := t.printBlockToFirehose(t.block)
+			bytes, err := t.printBlockToFirehose(t.block, libNum)
 			if err == nil {
 				t.flushToFirehose(bytes)
 			}

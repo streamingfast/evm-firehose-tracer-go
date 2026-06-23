@@ -6,22 +6,30 @@ import (
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 )
 
+// flushJob carries a block together with the LIB number computed at the time it
+// was enqueued. The LIB must be captured here (not recomputed by the worker)
+// because the tracer resets its finality state as soon as the block is pushed.
+type flushJob struct {
+	block  *pbeth.Block
+	libNum uint64
+}
+
 type ConcurrentFlushQueue struct {
 	bufferSize int
 
 	startSignal    chan uint64
-	jobQueue       chan *pbeth.Block
-	printBlockFunc func(block *pbeth.Block)
+	jobQueue       chan flushJob
+	printBlockFunc func(block *pbeth.Block, libNum uint64)
 	flushFunc      func()
 
 	jobWG     sync.WaitGroup
 	closeOnce sync.Once
 }
 
-func NewConcurrentFlushQueue(bufferSize int, printBlockFunc func(*pbeth.Block), flushFunc func()) *ConcurrentFlushQueue {
+func NewConcurrentFlushQueue(bufferSize int, printBlockFunc func(*pbeth.Block, uint64), flushFunc func()) *ConcurrentFlushQueue {
 	return &ConcurrentFlushQueue{
 		startSignal:    make(chan uint64, 1),
-		jobQueue:       make(chan *pbeth.Block, bufferSize),
+		jobQueue:       make(chan flushJob, bufferSize),
 		bufferSize:     bufferSize,
 		printBlockFunc: printBlockFunc,
 		flushFunc:      flushFunc,
@@ -35,8 +43,8 @@ func (q *ConcurrentFlushQueue) Start() {
 	go q.worker()
 }
 
-func (q *ConcurrentFlushQueue) Push(block *pbeth.Block) {
-	q.jobQueue <- block
+func (q *ConcurrentFlushQueue) Push(block *pbeth.Block, libNum uint64) {
+	q.jobQueue <- flushJob{block: block, libNum: libNum}
 }
 
 // Close signals the worker to shut down and waits for it to finish
@@ -52,8 +60,8 @@ func (q *ConcurrentFlushQueue) Close() {
 // worker listens for blocks and serializes them sequentially
 func (q *ConcurrentFlushQueue) worker() {
 	defer q.jobWG.Done()
-	for block := range q.jobQueue {
-		q.printBlockFunc(block)
+	for job := range q.jobQueue {
+		q.printBlockFunc(job.block, job.libNum)
 		q.flushFunc()
 	}
 }
