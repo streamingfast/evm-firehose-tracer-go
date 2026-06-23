@@ -3,6 +3,17 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v4.0.5
+
+### Fixed
+
+* The LIB (last irreversible block) number in the `FIRE BLOCK` header is now computed from the block's finalized reference instead of being hardcoded to `0`. When no finalized block is known (pre-merge chains, or before the consensus layer reports finality) it falls back to `blockNum - 200`, matching the historical native tracer behavior. This fixes downstream Firehose seeing a stuck `lib=0`.
+
+### Added
+
+* `FinalityStatus.LibNumForBlock(blockNum uint64) uint64` returning the LIB number to emit for a block (finalized number, or the `blockNum - 200` fallback).
+* `BlockEventBuilder.Finalized(number uint64, hash string)` to set the finalized block reference when building a block event.
+
 ## v4.0.4
 
 ### Fixed

@@ -31,8 +31,13 @@ func (t *Tracer) flushToFirehose(bytes []byte) error {
 	return err
 }
 
-// printBlockToFirehose serializes and writes a block to the output stream
-func (t *Tracer) printBlockToFirehose(block *pbeth.Block) ([]byte, error) {
+// printBlockToFirehose serializes and writes a block to the output stream.
+//
+// libNum is the LIB (last irreversible block) number to emit in the header; it
+// must be computed by the caller while the block's finality state is still live
+// (the concurrent flushing path resets finality before the block is flushed, so
+// reading it here would race). See FinalityStatus.LibNumForBlock.
+func (t *Tracer) printBlockToFirehose(block *pbeth.Block, libNum uint64) ([]byte, error) {
 	marshalled, err := proto.Marshal(block)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal block: %w", err)
@@ -44,11 +49,12 @@ func (t *Tracer) printBlockToFirehose(block *pbeth.Block) ([]byte, error) {
 	// Format: "FIRE BLOCK <block_num> <block_hash> <parent_num> <parent_hash> <lib_num> <timestamp> <payload>"
 	blockHash := hex.EncodeToString(block.Hash)
 	parentHash := hex.EncodeToString(block.Header.ParentHash)
-	line := fmt.Sprintf("FIRE BLOCK %d %s %d %s 0 %d %s\n",
+	line := fmt.Sprintf("FIRE BLOCK %d %s %d %s %d %d %s\n",
 		block.Number,
 		blockHash,
 		block.Number-1, // parent number
 		parentHash,
+		libNum,
 		block.Header.Timestamp.AsTime().UnixNano(),
 		encoded)
 	return []byte(line), nil
