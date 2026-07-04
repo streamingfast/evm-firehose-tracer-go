@@ -8,7 +8,7 @@ require (
 	github.com/streamingfast/firehose-ethereum/types v0.0.0-20260416183402-21195c1bf9b7
 	github.com/streamingfast/logging v0.0.0-20260108192805-38f96de0a641
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/crypto v0.44.0
+	golang.org/x/crypto v0.45.0
 	google.golang.org/protobuf v1.36.11
 )
 
