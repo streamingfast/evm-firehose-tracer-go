@@ -4,8 +4,9 @@ go 1.25.4
 
 require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.6
+	github.com/holiman/uint256 v1.3.2
 	github.com/streamingfast/eth-go v0.0.0-20260216202159-4e2b7501894a
-	github.com/streamingfast/firehose-ethereum/types v0.0.0-20260416183402-21195c1bf9b7
+	github.com/streamingfast/firehose-ethereum/types v0.0.0-20260929184701-68333bf7b217
 	github.com/streamingfast/logging v0.0.0-20260108192805-38f96de0a641
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.44.0
@@ -16,7 +17,6 @@ require (
 	github.com/blendle/zapdriver v1.3.2-0.20200203083823-9200777f8a3d // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
-	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect

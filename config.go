@@ -131,6 +131,11 @@ type Config struct {
 
 	// Chain-specific hooks, all optional.
 
+	// DropTransactionsWithoutReceipt leaves out of the block a transaction that ends without a
+	// receipt, for chains that skip failed transactions and carry on with the block (e.g.
+	// Arbitrum). When false, such a transaction is recorded without a receipt.
+	DropTransactionsWithoutReceipt bool
+
 	// IsNeverRevertedLog reports logs that stay in the receipt even when the call that
 	// emitted them is reverted (e.g. Polygon's fee transfer log).
 	IsNeverRevertedLog func(log *pbeth.Log) bool
@@ -148,6 +153,7 @@ func (c *Config) LogKeyValues() []any {
 		"config_ignore_genesis_block", fmt.Sprintf("%t", c.IgnoreGenesisBlock),
 		"config_enable_concurrent_flushing", fmt.Sprintf("%t", c.EnableConcurrentFlushing),
 		"config_concurrent_buffer_size", fmt.Sprintf("%d", c.ConcurrentBufferSize),
+		"config_drop_transactions_without_receipt", fmt.Sprintf("%t", c.DropTransactionsWithoutReceipt),
 	}
 }
 

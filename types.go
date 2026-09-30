@@ -21,6 +21,11 @@ type BlockEvent struct {
 	// Flash blocks are partial blocks emitted incrementally (used by Optimism/Katana).
 	// Each iteration has a monotonically increasing Idx within the same block number.
 	FlashBlock *FlashBlockData
+
+	// Rules, when set, are the fork rules of this block, used instead of computing them from
+	// ChainConfig. For chains whose fork activation depends on data outside the ChainConfig
+	// (e.g. Arbitrum activates Prague from the ArbOS version in the block header).
+	Rules *Rules
 }
 
 // FlashBlockData contains flash block sequence metadata.
@@ -83,6 +88,9 @@ type BlockData struct {
 	// SlotNumber was added by EIP-7843 and is ignored in legacy headers, it is scheduled to
 	// be added in Amsterdam hard fork.
 	SlotNumber *uint64
+
+	// BlockAccessListHash was added by EIP-7928, it is scheduled to be added in Amsterdam hard fork.
+	BlockAccessListHash *[32]byte
 }
 
 // UncleData contains uncle block header data
