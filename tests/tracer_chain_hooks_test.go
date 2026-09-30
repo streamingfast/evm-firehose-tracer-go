@@ -283,6 +283,35 @@ func TestTracer_DropTransactionsWithoutReceipt(t *testing.T) {
 		})
 }
 
+func TestTracer_DropTransactionsWithoutReceipt_Parallel(t *testing.T) {
+	coordinator := newChainHooksTester(t, &firehose.Config{DropTransactionsWithoutReceipt: true})
+	coordinator.StartBlock()
+
+	isolated0 := coordinator.Spawn(0)
+	isolated1 := coordinator.Spawn(1)
+
+	isolated0.
+		StartTrx(TestLegacyTrx).
+		StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
+		EndCall(nil, 21000).
+		EndTrx(nil, errors.New("filtered"))
+
+	isolated1.
+		StartTrx(TestLegacyTrx).
+		StartCall(AliceAddr, CharlieAddr, bigInt(0), 21000, nil).
+		EndCall(nil, 21000).
+		EndTrx(successReceipt(21000), nil)
+
+	coordinator.
+		Commit(isolated0).
+		Commit(isolated1).
+		EndBlock(nil).
+		Validate(func(block *pbeth.Block) {
+			require.Len(t, block.TransactionTraces, 1)
+			assert.Equal(t, CharlieAddr[:], block.TransactionTraces[0].Calls[0].Address)
+		})
+}
+
 func TestTracer_BlockEventRulesOverride(t *testing.T) {
 	delegationCode := append([]byte{0xef, 0x01, 0x00}, CharlieAddr[:]...)
 

@@ -87,6 +87,7 @@ type Tracer struct {
 	// - coordinator: reference to coordinator tracer (isolated mode only)
 	transactionIsolated  bool                    // true = isolated mode, false = coordinator mode
 	transactionTransient *pbeth.TransactionTrace // Completed transaction awaiting commit (isolated mode only)
+	transactionDropped   bool                    // Transaction ended without a receipt and was dropped, nothing to commit (isolated mode only)
 	commitMutex          sync.Mutex              // Serializes OnTxCommit calls (coordinator mode only)
 	coordinator          *Tracer                 // Reference to coordinator tracer (isolated mode only)
 
@@ -886,7 +887,11 @@ func (t *Tracer) OnTxEnd(receipt *ReceiptData, err error) {
 
 	if receipt == nil && t.config.DropTransactionsWithoutReceipt {
 		firehoseInfo("trx dropped, it has no receipt (err=%v)", err)
-		t.resetTransaction()
+		if t.transactionIsolated {
+			t.transactionDropped = true
+		} else {
+			t.resetTransaction()
+		}
 		return
 	}
 
@@ -1022,6 +1027,7 @@ func (t *Tracer) OnTxReset() {
 
 	// Reset transient state
 	t.transactionTransient = nil
+	t.transactionDropped = false
 
 	// Reset call state
 	t.callStack.Reset()
@@ -1041,7 +1047,9 @@ func (t *Tracer) OnTxReset() {
 // with an isolated tracer as the parameter.
 //
 // The method:
-//  1. Validates the isolated tracer has a completed transaction (transactionTransient != nil)
+//  1. Validates the isolated tracer has a completed transaction (transactionTransient != nil),
+//     or returns without appending anything when that transaction was dropped for having no
+//     receipt (Config.DropTransactionsWithoutReceipt)
 //  2. Reorders all ordinals in the transaction relative to coordinator's current ordinal
 //  3. Appends the transaction to the coordinator's block
 //  4. Updates the coordinator's ordinal counter
@@ -1076,6 +1084,13 @@ func (t *Tracer) OnTxCommit(isolatedTracer *Tracer) error {
 	// Validate parameter is isolated tracer
 	if !isolatedTracer.transactionIsolated {
 		return fmt.Errorf("OnTxCommit parameter must be an isolated tracer")
+	}
+
+	if isolatedTracer.transactionDropped {
+		firehoseInfo("isolated transaction was dropped, nothing to commit (coordinator=%s, isolated=%s)",
+			t.tracerID, isolatedTracer.tracerID)
+		isolatedTracer.transactionDropped = false
+		return nil
 	}
 
 	// Validate isolated tracer has completed transaction
