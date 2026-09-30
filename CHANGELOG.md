@@ -14,10 +14,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * `ChainConfig.ShanghaiBlock`, `CancunBlock` and `PragueBlock` to activate forks by block number, for chains that schedule them that way (e.g. Polygon PoS). A fork is active when either its time or its block condition holds.
 * `Config.IsNeverRevertedLog` to mark logs that stay in the receipt even when the call that emitted them is reverted.
 * `Config.BeforeBlockFlush` called with the completed block right before it is written out, letting the chain rewrite it.
+* `Config.DropTransactionsWithoutReceipt` to leave out of the block a transaction that ends without a receipt, for chains that skip failed transactions and carry on with the block (e.g. Arbitrum).
+* `BlockEvent.Rules` to give the fork rules of a block instead of computing them from `ChainConfig`, for chains whose fork activation depends on data outside it (e.g. Arbitrum activates Prague from the ArbOS version).
+* EIP-7928 (Amsterdam): `BlockData.BlockAccessListHash` field and `BlockHeader.BlockAccessListHash` propagation.
 
 ### Changed
 
 * `OnLog` now accepts a log emitted while no call is active in a transaction (e.g. Polygon's fee transfer log emitted after the root call ends) and attaches it to the root call, instead of panicking. It still panics when there is no root call to attach the log to: in a system call, or in a transaction without calls.
+* `OnStorageChange` now accepts a storage change made while no call is active in a transaction (e.g. Arbitrum's ArbOS writes around the EVM call) and attaches it to the root call, with the same panics as `OnLog` when there is no root call.
+* `OnSystemCallStart` can now be called while a transaction is being traced (e.g. Arbitrum runs a system call within its internal transaction). The transaction is set aside and restored when the system call ends.
+* Keccak preimages are now filtered: `Call.KeccakPreimages` only holds preimages of at most 256 bytes that explain a storage slot written by the transaction or system call, directly, at an offset below 2^64, or through nested hashing up to 16 levels. Preimages used only for reads, signatures, CREATE2 addresses or contract-level hashing are dropped.
 * Trace/debug log calls in `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` are now emitted before early-return guards so they fire even for no-op (equal old/new value) invocations.
 * `OnBalanceChange`, `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` now skip recording when old and new values are equal. This avoids emitting no-op state changes in the block model.
 * `FIRE BLOCK` output line now includes a flash block index slot and a computed `lib_num`. New format: `FIRE BLOCK <block_num> <flash_block_idx> <block_hash> <prev_num> <prev_hash> <lib_num> <timestamp_unix_nano> <payload_base64>`. `flash_block_idx` is `0` for non-flash blocks. `lib_num` is derived from the current `FinalityStatus` (falling back to `max(block_num-200, 0)` when no finality is known, and always capped to no more than 200 blocks behind `block_num`).
