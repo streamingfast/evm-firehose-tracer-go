@@ -2,11 +2,13 @@ package firehose
 
 import (
 	"bytes"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"slices"
+	"strconv"
 
+	"github.com/emmansun/base64"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
-	"google.golang.org/protobuf/proto"
 )
 
 // blockOutput carries a block together with the precomputed context needed to
@@ -60,17 +62,28 @@ func (t *Tracer) flushToFirehose(data []byte) {
 	panic(fmt.Errorf("failed to write to Firehose output after %d attempts, %d bytes not written: %w", maxWriteAttempts, len(data), err))
 }
 
+// blockLineBuffers holds the scratch buffers used to render a FIRE BLOCK line. A traced
+// block routinely marshals to several megabytes, so the buffers are kept and reused from
+// one block to the next instead of being reallocated and garbage collected every time.
+type blockLineBuffers struct {
+	payload []byte
+	line    []byte
+}
+
 // writeBlock serializes and writes a block to the output stream, panicking on failure.
+// It must not be called concurrently: blocks are written either synchronously from
+// OnBlockEnd or by the single ConcurrentFlushQueue worker, never both.
 func (t *Tracer) writeBlock(out *blockOutput) {
-	bytes, err := t.printBlockToFirehose(out)
+	line, err := t.blockLine.render(out)
 	if err != nil {
 		panic(fmt.Errorf("failed to print block #%d to Firehose output: %w", out.block.Number, err))
 	}
 
-	t.flushToFirehose(bytes)
+	t.flushToFirehose(line)
 }
 
-// printBlockToFirehose serializes and writes a block to the output stream.
+// render serializes the block into a FIRE BLOCK line. The returned slice aliases the
+// receiver's buffers and is only valid until the next call to render.
 //
 // Output format (one line):
 //
@@ -78,42 +91,45 @@ func (t *Tracer) writeBlock(out *blockOutput) {
 //
 // flash_block_idx is 0 for non-flash blocks; for flash blocks it is the current
 // flash block index plus 1000 when this is the final iteration for the block.
-func (t *Tracer) printBlockToFirehose(out *blockOutput) ([]byte, error) {
+func (b *blockLineBuffers) render(out *blockOutput) ([]byte, error) {
 	block := out.block
 
-	marshalled, err := proto.Marshal(block)
+	size := block.SizeVT()
+	b.payload = slices.Grow(b.payload[:0], size)[:size]
+	n, err := block.MarshalToSizedBufferVT(b.payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal block: %w", err)
 	}
+	payload := b.payload[len(b.payload)-n:]
 
 	previousNum := uint64(0)
 	if block.Number > 0 {
 		previousNum = block.Number - 1
 	}
 
-	// Build the header plus base64 payload in a single buffer to minimize copies.
-	// **Important** The final space in the Sprintf template is mandatory.
-	buf := bytes.NewBuffer(nil)
-	fmt.Fprintf(buf, "FIRE BLOCK %d %d %s %d %s %d %d ",
-		block.Number,
-		out.printedFlashBlockIndex,
-		block.ID(),
-		previousNum,
-		block.PreviousID(),
-		out.libNum,
-		block.MustTime().UnixNano(),
-	)
+	// Header fields are small; 2*32 bytes of hashes plus 5 numbers fit well under 256 bytes.
+	line := slices.Grow(b.line[:0], 256+base64.StdEncoding.EncodedLen(len(payload))+1)
+	line = append(line, "FIRE BLOCK "...)
+	line = strconv.AppendUint(line, block.Number, 10)
+	line = append(line, ' ')
+	line = strconv.AppendUint(line, out.printedFlashBlockIndex, 10)
+	line = append(line, ' ')
+	line = hex.AppendEncode(line, block.Hash)
+	line = append(line, ' ')
+	line = strconv.AppendUint(line, previousNum, 10)
+	line = append(line, ' ')
+	line = hex.AppendEncode(line, block.Header.ParentHash)
+	line = append(line, ' ')
+	line = strconv.AppendUint(line, out.libNum, 10)
+	line = append(line, ' ')
+	line = strconv.AppendInt(line, block.MustTime().UnixNano(), 10)
+	// **Important** The space separating the header from the payload is mandatory.
+	line = append(line, ' ')
+	line = base64.StdEncoding.AppendEncode(line, payload)
+	line = append(line, '\n')
 
-	encoder := base64.NewEncoder(base64.StdEncoding, buf)
-	if _, err := encoder.Write(marshalled); err != nil {
-		return nil, fmt.Errorf("write to base64 encoder should have been infallible: %w", err)
-	}
-	if err := encoder.Close(); err != nil {
-		return nil, fmt.Errorf("closing base64 encoder should have been infallible: %w", err)
-	}
-
-	buf.WriteString("\n")
-	return buf.Bytes(), nil
+	b.line = line
+	return line, nil
 }
 
 // computeLibNum computes the last irreversible block number to advertise for the

@@ -53,6 +53,7 @@ type Tracer struct {
 	tracerID                  string
 	concurrentFlushQueue      *ConcurrentFlushQueue
 	concurrentFlushBufferSize int
+	blockLine                 blockLineBuffers // Reused across blocks; only touched by writeBlock
 
 	// Block state
 	block                       *pbeth.Block
