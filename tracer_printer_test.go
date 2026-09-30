@@ -97,6 +97,14 @@ func TestComputeLibNum(t *testing.T) {
 			expected:    50,
 		},
 
+		// --- Finality is ahead of the block (replayed block): capped to the block ---
+		{
+			name:        "finalized_ahead_of_block",
+			blockNumber: 500,
+			finalized:   600,
+			expected:    500,
+		},
+
 		// --- Edge: small block numbers with finality set ---
 		{
 			name:        "finalized_small_block_no_clamp",

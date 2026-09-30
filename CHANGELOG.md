@@ -11,12 +11,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * `FlashBlockData.IsFinal` flag to mark the final flash block iteration for a block. When set, the emitted `FIRE BLOCK` line encodes the flash block index as `Idx + 1000` (partials 1..9 emit as 1..9, the final 10th partial emits as 1010), matching the Optimism Geth firehose tracer behavior.
 * `FinalityStatus.IsEmpty()` method.
 * EIP-7843 (Amsterdam): `BlockData.SlotNumber` field and `BlockHeader.SlotNumber` propagation.
+* `ChainConfig.ShanghaiBlock`, `CancunBlock` and `PragueBlock` to activate forks by block number, for chains that schedule them that way (e.g. Polygon PoS). A fork is active when either its time or its block condition holds.
+* `Config.AllowLogsOutsideCall` to accept logs emitted while no call is active in a transaction; they are attached to the root call.
+* `Config.IsNeverRevertedLog` to mark logs that stay in the receipt even when the call that emitted them is reverted.
+* `Config.BeforeBlockFlush` called with the completed block right before it is written out, letting the chain rewrite it.
 
 ### Changed
 
 * Trace/debug log calls in `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` are now emitted before early-return guards so they fire even for no-op (equal old/new value) invocations.
 * `OnBalanceChange`, `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` now skip recording when old and new values are equal. This avoids emitting no-op state changes in the block model.
 * `FIRE BLOCK` output line now includes a flash block index slot and a computed `lib_num`. New format: `FIRE BLOCK <block_num> <flash_block_idx> <block_hash> <prev_num> <prev_hash> <lib_num> <timestamp_unix_nano> <payload_base64>`. `flash_block_idx` is `0` for non-flash blocks. `lib_num` is derived from the current `FinalityStatus` (falling back to `max(block_num-200, 0)` when no finality is known, and always capped to no more than 200 blocks behind `block_num`).
+* The LIB number in the `FIRE BLOCK` line is now capped to the block number, so a replayed block never advertises a LIB ahead of itself.
+* Writing to the output stream now retries short writes and panics when the data still can't be written, instead of silently dropping the block. Block serialization errors also panic.
 * Block withdrawals are now always recorded. The `Config.SkipWithdrawals` flag has been removed; consumers that previously relied on it to suppress withdrawals should handle filtering on their side if needed.
 
 ### Removed
