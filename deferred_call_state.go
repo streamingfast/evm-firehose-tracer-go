@@ -31,6 +31,11 @@ func (d *DeferredCallState) IsEmpty() bool {
 		len(d.logs) == 0
 }
 
+// HasLogs returns true if there are deferred logs
+func (d *DeferredCallState) HasLogs() bool {
+	return len(d.logs) > 0
+}
+
 // Reset clears all deferred state
 func (d *DeferredCallState) Reset() {
 	d.accountCreations = nil

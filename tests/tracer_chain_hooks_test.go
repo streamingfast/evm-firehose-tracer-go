@@ -55,9 +55,9 @@ func newChainHooksTester(t *testing.T, config *firehose.Config) *TracerTester {
 	return newTracerTesterWithFullConfig(t, config)
 }
 
-func TestTracer_AllowLogsOutsideCall(t *testing.T) {
+func TestTracer_LogOutsideCall(t *testing.T) {
 	t.Run("log_after_root_call_is_attached_to_root_call", func(t *testing.T) {
-		newChainHooksTester(t, &firehose.Config{AllowLogsOutsideCall: true}).
+		newChainHooksTester(t, &firehose.Config{}).
 			StartBlockTrx(TestLegacyTrx).
 			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
 			Log(BobAddr, [][32]byte{topic("inside")}, nil, 0).
@@ -81,14 +81,26 @@ func TestTracer_AllowLogsOutsideCall(t *testing.T) {
 			})
 	})
 
-	t.Run("log_outside_call_panics_when_not_allowed", func(t *testing.T) {
+	t.Run("log_in_transaction_without_calls_panics", func(t *testing.T) {
 		tester := newChainHooksTester(t, &firehose.Config{}).
 			StartBlockTrx(TestLegacyTrx).
-			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
-			EndCall(nil, 21000)
+			Log(CharlieAddr, [][32]byte{topic("orphan")}, nil, 0)
 
 		assert.Panics(t, func() {
-			tester.Log(CharlieAddr, [][32]byte{topic("after")}, nil, 0)
+			tester.EndTrx(receiptWithLogs(21000, []firehose.LogData{
+				log1(CharlieAddr, topic("orphan"), nil),
+			}), nil)
+		})
+	})
+
+	t.Run("log_in_system_call_outside_call_panics", func(t *testing.T) {
+		tester := newChainHooksTester(t, &firehose.Config{}).
+			StartBlock().
+			StartSystemCall().
+			Log(CharlieAddr, [][32]byte{topic("orphan")}, nil, 0)
+
+		assert.Panics(t, func() {
+			tester.EndSystemCall()
 		})
 	})
 }
@@ -97,8 +109,7 @@ func TestTracer_IsNeverRevertedLog(t *testing.T) {
 	reverted := errors.New(firehose.TextExecutionRevertedErr)
 
 	newChainHooksTester(t, &firehose.Config{
-		AllowLogsOutsideCall: true,
-		IsNeverRevertedLog:   isNeverRevertedTestLog,
+		IsNeverRevertedLog: isNeverRevertedTestLog,
 	}).
 		StartBlockTrx(TestLegacyTrx).
 		StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
