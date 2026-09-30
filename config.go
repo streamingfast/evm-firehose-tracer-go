@@ -131,11 +131,6 @@ type Config struct {
 
 	// Chain-specific hooks, all optional.
 
-	// AllowLogsOutsideCall accepts logs emitted while no call is active in a transaction
-	// (e.g. Polygon's fee transfer log emitted after the root call ends). Such logs are
-	// attached to the transaction's root call. When false, such a log is an invalid state.
-	AllowLogsOutsideCall bool
-
 	// IsNeverRevertedLog reports logs that stay in the receipt even when the call that
 	// emitted them is reverted (e.g. Polygon's fee transfer log).
 	IsNeverRevertedLog func(log *pbeth.Log) bool
@@ -153,7 +148,6 @@ func (c *Config) LogKeyValues() []any {
 		"config_ignore_genesis_block", fmt.Sprintf("%t", c.IgnoreGenesisBlock),
 		"config_enable_concurrent_flushing", fmt.Sprintf("%t", c.EnableConcurrentFlushing),
 		"config_concurrent_buffer_size", fmt.Sprintf("%d", c.ConcurrentBufferSize),
-		"config_allow_logs_outside_call", fmt.Sprintf("%t", c.AllowLogsOutsideCall),
 	}
 }
 

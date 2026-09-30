@@ -1091,6 +1091,10 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	firehoseInfo("completing transaction (call_count=%d)", len(t.transaction.Calls))
 
 	if len(t.transaction.Calls) == 0 {
+		if t.deferredCallState.HasLogs() {
+			t.panicInvalidState("transaction emitted a log but has no root call to attach it to", 1)
+		}
+
 		// Bad block or misconfigured - terminate immediately
 		t.transaction.EndOrdinal = t.blockOrdinal.Next()
 		return t.transaction
@@ -1212,9 +1216,11 @@ func (t *Tracer) assignOrdinalAndIndexToReceiptLogs() {
 	var callLogs []*pbeth.Log
 	for _, call := range t.transaction.Calls {
 		if call.StateReverted {
-			for _, log := range call.Logs {
-				if t.isNeverRevertedLog(log) {
-					callLogs = append(callLogs, log)
+			if t.config.IsNeverRevertedLog != nil {
+				for _, log := range call.Logs {
+					if t.config.IsNeverRevertedLog(log) {
+						callLogs = append(callLogs, log)
+					}
 				}
 			}
 			continue
@@ -1636,12 +1642,11 @@ func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byt
 
 // OnLog is called when a log event is emitted
 // Note: blockIndex comes from the log itself (from go-ethereum types.Log.Index)
+//
+// A log emitted while no call is active (e.g. Polygon's fee transfer log emitted after
+// the root call ends) is attached to the transaction's root call.
 func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) {
-	if t.config.AllowLogsOutsideCall {
-		t.ensureInBlockAndInTrx()
-	} else {
-		t.ensureInBlockAndInTrxAndInCall()
-	}
+	t.ensureInBlockAndInTrx()
 
 	pbLog := &pbeth.Log{
 		Address:    addr[:],
@@ -1657,7 +1662,6 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 
 	activeCall := t.callStack.Peek()
 	if activeCall == nil {
-		// Only reachable with AllowLogsOutsideCall, the log goes to the root call
 		firehoseTrace("adding log to deferred call state (address=%s)", shortAddressView(&addr))
 		t.deferredCallState.AddLog(pbLog)
 	} else {
@@ -1689,6 +1693,10 @@ func (t *Tracer) OnSystemCallEnd() {
 	firehoseInfo("system call end")
 	t.ensureInBlockAndInTrx()
 	t.ensureInSystemCall()
+
+	if t.deferredCallState.HasLogs() {
+		t.panicInvalidState("system call emitted a log while no call was active, there is no root call to attach it to", 1)
+	}
 
 	// Move any calls created during system call to block's system calls list
 	// (matching native tracer line 688)

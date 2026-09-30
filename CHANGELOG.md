@@ -12,12 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 * `FinalityStatus.IsEmpty()` method.
 * EIP-7843 (Amsterdam): `BlockData.SlotNumber` field and `BlockHeader.SlotNumber` propagation.
 * `ChainConfig.ShanghaiBlock`, `CancunBlock` and `PragueBlock` to activate forks by block number, for chains that schedule them that way (e.g. Polygon PoS). A fork is active when either its time or its block condition holds.
-* `Config.AllowLogsOutsideCall` to accept logs emitted while no call is active in a transaction; they are attached to the root call.
 * `Config.IsNeverRevertedLog` to mark logs that stay in the receipt even when the call that emitted them is reverted.
 * `Config.BeforeBlockFlush` called with the completed block right before it is written out, letting the chain rewrite it.
 
 ### Changed
 
+* `OnLog` now accepts a log emitted while no call is active in a transaction (e.g. Polygon's fee transfer log emitted after the root call ends) and attaches it to the root call, instead of panicking. It still panics when there is no root call to attach the log to: in a system call, or in a transaction without calls.
 * Trace/debug log calls in `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` are now emitted before early-return guards so they fire even for no-op (equal old/new value) invocations.
 * `OnBalanceChange`, `OnNonceChange`, `OnCodeChange`, and `OnStorageChange` now skip recording when old and new values are equal. This avoids emitting no-op state changes in the block model.
 * `FIRE BLOCK` output line now includes a flash block index slot and a computed `lib_num`. New format: `FIRE BLOCK <block_num> <flash_block_idx> <block_hash> <prev_num> <prev_hash> <lib_num> <timestamp_unix_nano> <payload_base64>`. `flash_block_idx` is `0` for non-flash blocks. `lib_num` is derived from the current `FinalityStatus` (falling back to `max(block_num-200, 0)` when no finality is known, and always capped to no more than 200 blocks behind `block_num`).
