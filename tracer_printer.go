@@ -38,14 +38,36 @@ func (t *Tracer) GetTestingOutputBuffer() *bytes.Buffer {
 
 // printToFirehose writes a message to the Firehose output stream
 func (t *Tracer) printToFirehose(args ...any) {
-	line := fmt.Sprintln(args...)
-	t.outputWriter.Write([]byte(line))
+	t.flushToFirehose([]byte(fmt.Sprintln(args...)))
 }
 
-// flushToFirehose writes bytes directly to the output stream
-func (t *Tracer) flushToFirehose(bytes []byte) error {
-	_, err := t.outputWriter.Write(bytes)
-	return err
+// maxWriteAttempts bounds how many times a short write to the output stream is retried.
+const maxWriteAttempts = 10
+
+// flushToFirehose writes bytes to the output stream, retrying short writes. It panics when
+// the bytes still cannot be fully written, stopping the node instead of silently losing a block.
+func (t *Tracer) flushToFirehose(data []byte) {
+	var err error
+	for attempt := 0; attempt < maxWriteAttempts; attempt++ {
+		var written int
+		written, err = t.outputWriter.Write(data)
+		data = data[written:]
+		if len(data) == 0 {
+			return
+		}
+	}
+
+	panic(fmt.Errorf("failed to write to Firehose output after %d attempts, %d bytes not written: %w", maxWriteAttempts, len(data), err))
+}
+
+// writeBlock serializes and writes a block to the output stream, panicking on failure.
+func (t *Tracer) writeBlock(out *blockOutput) {
+	bytes, err := t.printBlockToFirehose(out)
+	if err != nil {
+		panic(fmt.Errorf("failed to print block #%d to Firehose output: %w", out.block.Number, err))
+	}
+
+	t.flushToFirehose(bytes)
 }
 
 // printBlockToFirehose serializes and writes a block to the output stream.
@@ -100,6 +122,7 @@ func (t *Tracer) printBlockToFirehose(out *blockOutput) ([]byte, error) {
 //   - When finality is known, use LastFinalizedBlock.
 //   - When finality is empty, fall back to max(blockNumber-200, 0).
 //   - In all cases, never let libNum fall more than 200 blocks behind blockNumber.
+//   - In all cases, never let libNum be greater than blockNumber.
 func computeLibNum(blockNumber uint64, finality *FinalityStatus) uint64 {
 	libNum := finality.LastFinalizedBlock()
 
@@ -114,6 +137,12 @@ func computeLibNum(blockNumber uint64, finality *FinalityStatus) uint64 {
 	// Cap: libNum must never trail blockNumber by more than 200 blocks.
 	if blockNumber >= 200 && libNum < blockNumber-200 {
 		libNum = blockNumber - 200
+	}
+
+	// Cap: libNum must never be ahead of blockNumber, which happens when a known block
+	// is replayed (e.g. OnSkippedBlock during sync) while finality is already past it.
+	if libNum > blockNumber {
+		libNum = blockNumber
 	}
 
 	return libNum

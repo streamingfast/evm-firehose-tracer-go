@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+
+	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 )
 
 // SetCodeAuthRecovery is a function that recovers the authority (signer address) from a SetCodeAuthorization
@@ -55,6 +57,13 @@ type ChainConfig struct {
 	PragueTime   *uint64 // EIP-7702 (set code), EIP-2537 (BLS precompile)
 	VerkleTime   *uint64 // Verkle tree transition (future)
 
+	// Block-number-based activation of the same forks, for chains that schedule them by
+	// block number (e.g. Polygon PoS). A fork is active when either its time or its block
+	// condition holds.
+	ShanghaiBlock *big.Int
+	CancunBlock   *big.Int
+	PragueBlock   *big.Int
+
 	// SetCodeAuthRecovery is a chain-specific function to recover authority from EIP-7702 authorizations
 	// If nil, DefaultSetCodeAuthRecovery will be used (standard Ethereum ECDSA signature recovery)
 	// Custom chains can override this if they use different signature schemes
@@ -63,17 +72,17 @@ type ChainConfig struct {
 
 // IsShanghai returns whether the given timestamp is >= Shanghai fork
 func (c *ChainConfig) IsShanghai(num *big.Int, timestamp uint64) bool {
-	return isTimestampForked(c.ShanghaiTime, timestamp)
+	return isTimestampForked(c.ShanghaiTime, timestamp) || isBlockForked(c.ShanghaiBlock, num)
 }
 
 // IsCancun returns whether the given timestamp is >= Cancun fork
 func (c *ChainConfig) IsCancun(num *big.Int, timestamp uint64) bool {
-	return isTimestampForked(c.CancunTime, timestamp)
+	return isTimestampForked(c.CancunTime, timestamp) || isBlockForked(c.CancunBlock, num)
 }
 
 // IsPrague returns whether the given timestamp is >= Prague fork
 func (c *ChainConfig) IsPrague(num *big.Int, timestamp uint64) bool {
-	return isTimestampForked(c.PragueTime, timestamp)
+	return isTimestampForked(c.PragueTime, timestamp) || isBlockForked(c.PragueBlock, num)
 }
 
 // IsVerkle returns whether the given timestamp is >= Verkle fork
@@ -119,16 +128,32 @@ type Config struct {
 	ConcurrentBufferSize     int
 	// Output destination (defaults to os.Stdout)
 	OutputWriter io.Writer
+
+	// Chain-specific hooks, all optional.
+
+	// AllowLogsOutsideCall accepts logs emitted while no call is active in a transaction
+	// (e.g. Polygon's fee transfer log emitted after the root call ends). Such logs are
+	// attached to the transaction's root call. When false, such a log is an invalid state.
+	AllowLogsOutsideCall bool
+
+	// IsNeverRevertedLog reports logs that stay in the receipt even when the call that
+	// emitted them is reverted (e.g. Polygon's fee transfer log).
+	IsNeverRevertedLog func(log *pbeth.Log) bool
+
+	// BeforeBlockFlush is called with the completed block right before it is written out,
+	// letting the chain rewrite it (e.g. Polygon merging its system transactions).
+	BeforeBlockFlush func(block *pbeth.Block)
 }
 
 // LogKeyValues returns a flat list of key-value pairs suitable for structured logging,
-// one pair per Config field (excluding ChainConfig and OutputWriter).
+// one pair per Config field (excluding ChainConfig, OutputWriter and function hooks).
 // Keys are prefixed with "config_" and values are human-readable strings.
 func (c *Config) LogKeyValues() []any {
 	return []any{
 		"config_ignore_genesis_block", fmt.Sprintf("%t", c.IgnoreGenesisBlock),
 		"config_enable_concurrent_flushing", fmt.Sprintf("%t", c.EnableConcurrentFlushing),
 		"config_concurrent_buffer_size", fmt.Sprintf("%d", c.ConcurrentBufferSize),
+		"config_allow_logs_outside_call", fmt.Sprintf("%t", c.AllowLogsOutsideCall),
 	}
 }
 
@@ -138,4 +163,12 @@ func isTimestampForked(fork *uint64, timestamp uint64) bool {
 		return false
 	}
 	return *fork <= timestamp
+}
+
+// Helper function to check if a block-number-based fork is active
+func isBlockForked(fork *big.Int, num *big.Int) bool {
+	if fork == nil || num == nil {
+		return false
+	}
+	return fork.Cmp(num) <= 0
 }

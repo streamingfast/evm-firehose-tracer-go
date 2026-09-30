@@ -14,6 +14,7 @@ type DeferredCallState struct {
 	balanceChanges   []*pbeth.BalanceChange
 	nonceChanges     []*pbeth.NonceChange
 	codeChanges      []*pbeth.CodeChange
+	logs             []*pbeth.Log
 }
 
 // NewDeferredCallState creates a new empty deferred call state
@@ -26,7 +27,8 @@ func (d *DeferredCallState) IsEmpty() bool {
 	return len(d.accountCreations) == 0 &&
 		len(d.balanceChanges) == 0 &&
 		len(d.nonceChanges) == 0 &&
-		len(d.codeChanges) == 0
+		len(d.codeChanges) == 0 &&
+		len(d.logs) == 0
 }
 
 // Reset clears all deferred state
@@ -35,6 +37,7 @@ func (d *DeferredCallState) Reset() {
 	d.balanceChanges = nil
 	d.nonceChanges = nil
 	d.codeChanges = nil
+	d.logs = nil
 }
 
 // AddAccountCreation adds an account creation to deferred state
@@ -55,6 +58,11 @@ func (d *DeferredCallState) AddNonceChange(change *pbeth.NonceChange) {
 // AddCodeChange adds a code change to deferred state
 func (d *DeferredCallState) AddCodeChange(change *pbeth.CodeChange) {
 	d.codeChanges = append(d.codeChanges, change)
+}
+
+// AddLog adds a log to deferred state
+func (d *DeferredCallState) AddLog(log *pbeth.Log) {
+	d.logs = append(d.logs, log)
 }
 
 // MaybePopulateCallAndReset populates the call with deferred state if any exists
@@ -81,6 +89,7 @@ func (d *DeferredCallState) MaybePopulateCallAndReset(source string, call *pbeth
 		call.BalanceChanges = append(d.balanceChanges, call.BalanceChanges...)
 		call.NonceChanges = append(d.nonceChanges, call.NonceChanges...)
 		call.CodeChanges = append(d.codeChanges, call.CodeChanges...)
+		call.Logs = append(d.logs, call.Logs...)
 	} else {
 		// APPEND deferred state (changes that happened AFTER the call)
 		// This maintains chronological order: before -> during -> after
@@ -88,6 +97,7 @@ func (d *DeferredCallState) MaybePopulateCallAndReset(source string, call *pbeth
 		call.BalanceChanges = append(call.BalanceChanges, d.balanceChanges...)
 		call.NonceChanges = append(call.NonceChanges, d.nonceChanges...)
 		call.CodeChanges = append(call.CodeChanges, d.codeChanges...)
+		call.Logs = append(call.Logs, d.logs...)
 	}
 
 	d.Reset()

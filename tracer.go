@@ -156,12 +156,7 @@ func NewTracer(config *Config) *Tracer {
 	if config.EnableConcurrentFlushing && config.ConcurrentBufferSize > 0 {
 		tracer.concurrentFlushQueue = NewConcurrentFlushQueue(
 			config.ConcurrentBufferSize,
-			func(out *blockOutput) {
-				bytes, err := tracer.printBlockToFirehose(out)
-				if err == nil {
-					tracer.flushToFirehose(bytes)
-				}
-			},
+			tracer.writeBlock,
 			func() {}, // No additional flush needed
 		)
 		tracer.concurrentFlushQueue.Start()
@@ -453,6 +448,10 @@ func (t *Tracer) OnBlockEnd(err error) {
 	firehoseInfo("block ending (err=%v)", err)
 
 	if err == nil {
+		if t.config.BeforeBlockFlush != nil {
+			t.config.BeforeBlockFlush(t.block)
+		}
+
 		// Reorder isolated transactions if needed
 		if t.blockReorderOrdinal {
 			t.reorderIsolatedTransactionsAndOrdinals()
@@ -472,10 +471,7 @@ func (t *Tracer) OnBlockEnd(err error) {
 		if t.concurrentFlushQueue != nil {
 			t.concurrentFlushQueue.Push(out)
 		} else {
-			bytes, err := t.printBlockToFirehose(out)
-			if err == nil {
-				t.flushToFirehose(bytes)
-			}
+			t.writeBlock(out)
 		}
 	} else {
 		// An error occurred, could have happened in transaction/call context
@@ -1200,6 +1196,9 @@ func (t *Tracer) removeLogBlockIndexOnStateRevertedCalls() {
 	for _, call := range t.transaction.Calls {
 		if call.StateReverted {
 			for _, log := range call.Logs {
+				if t.isNeverRevertedLog(log) {
+					continue
+				}
 				log.BlockIndex = 0
 			}
 		}
@@ -1209,10 +1208,15 @@ func (t *Tracer) removeLogBlockIndexOnStateRevertedCalls() {
 // assignOrdinalAndIndexToReceiptLogs copies ordinals and indexes from call logs to receipt logs
 // This matches the native tracer's assignOrdinalAndIndexToReceiptLogs function
 func (t *Tracer) assignOrdinalAndIndexToReceiptLogs() {
-	// Collect all logs from non-reverted calls
+	// Collect all logs from non-reverted calls, plus never reverted logs of reverted calls
 	var callLogs []*pbeth.Log
 	for _, call := range t.transaction.Calls {
 		if call.StateReverted {
+			for _, log := range call.Logs {
+				if t.isNeverRevertedLog(log) {
+					callLogs = append(callLogs, log)
+				}
+			}
 			continue
 		}
 		callLogs = append(callLogs, call.Logs...)
@@ -1258,6 +1262,10 @@ func (t *Tracer) assignOrdinalAndIndexToReceiptLogs() {
 		receiptLog.Ordinal = callLog.Ordinal
 		receiptLog.Index = callLog.Index
 	}
+}
+
+func (t *Tracer) isNeverRevertedLog(log *pbeth.Log) bool {
+	return t.config.IsNeverRevertedLog != nil && t.config.IsNeverRevertedLog(log)
 }
 
 // populateStateReverted walks the call tree and marks reverted state
@@ -1629,11 +1637,11 @@ func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byt
 // OnLog is called when a log event is emitted
 // Note: blockIndex comes from the log itself (from go-ethereum types.Log.Index)
 func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex uint32) {
-	t.ensureInBlockAndInTrxAndInCall()
-
-	activeCall := t.callStack.Peek()
-	firehoseTrace("adding log to call (address=%s call=%d [has already %d logs])",
-		shortAddressView(&addr), activeCall.Index, len(activeCall.Logs))
+	if t.config.AllowLogsOutsideCall {
+		t.ensureInBlockAndInTrx()
+	} else {
+		t.ensureInBlockAndInTrxAndInCall()
+	}
 
 	pbLog := &pbeth.Log{
 		Address:    addr[:],
@@ -1647,7 +1655,17 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 		pbLog.Topics = append(pbLog.Topics, topic[:])
 	}
 
-	activeCall.Logs = append(activeCall.Logs, pbLog)
+	activeCall := t.callStack.Peek()
+	if activeCall == nil {
+		// Only reachable with AllowLogsOutsideCall, the log goes to the root call
+		firehoseTrace("adding log to deferred call state (address=%s)", shortAddressView(&addr))
+		t.deferredCallState.AddLog(pbLog)
+	} else {
+		firehoseTrace("adding log to call (address=%s call=%d [has already %d logs])",
+			shortAddressView(&addr), activeCall.Index, len(activeCall.Logs))
+		activeCall.Logs = append(activeCall.Logs, pbLog)
+	}
+
 	t.transactionLogIndex++
 }
 
