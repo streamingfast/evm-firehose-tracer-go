@@ -2,12 +2,12 @@ package firehose
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"slices"
 	"strconv"
 
+	"github.com/emmansun/base64"
 	pbeth "github.com/streamingfast/firehose-ethereum/types/pb/sf/ethereum/type/v2"
 )
 
@@ -125,7 +125,7 @@ func (b *blockLineBuffers) render(out *blockOutput) ([]byte, error) {
 	line = strconv.AppendInt(line, block.MustTime().UnixNano(), 10)
 	// **Important** The space separating the header from the payload is mandatory.
 	line = append(line, ' ')
-	line = appendBase64(line, payload)
+	line = base64.StdEncoding.AppendEncode(line, payload)
 	line = append(line, '\n')
 
 	b.line = line
