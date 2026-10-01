@@ -197,3 +197,148 @@ func TestTracer_OutputWriteFailures(t *testing.T) {
 		assert.Panics(t, func() { tracer.OnBlockEnd(nil) })
 	})
 }
+
+func TestTracer_StorageChangeOutsideCall(t *testing.T) {
+	slot, value := hash32(1), hash32(2)
+
+	t.Run("storage_change_around_root_call_is_attached_to_root_call", func(t *testing.T) {
+		newChainHooksTester(t, &firehose.Config{}).
+			StartBlockTrx(TestLegacyTrx).
+			StorageChange(CharlieAddr, slot, firehose.EmptyHash, value).
+			StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
+			EndCall(nil, 21000).
+			StorageChange(CharlieAddr, slot, value, firehose.EmptyHash).
+			EndBlockTrx(successReceipt(21000), nil, nil).
+			Validate(func(block *pbeth.Block) {
+				rootCall := block.TransactionTraces[0].Calls[0]
+
+				require.Len(t, rootCall.StorageChanges, 2)
+				assert.Equal(t, value[:], rootCall.StorageChanges[0].NewValue)
+				assert.Less(t, rootCall.StorageChanges[0].Ordinal, rootCall.BeginOrdinal)
+				assert.Equal(t, value[:], rootCall.StorageChanges[1].OldValue)
+				assert.Greater(t, rootCall.StorageChanges[1].Ordinal, rootCall.EndOrdinal)
+			})
+	})
+
+	t.Run("storage_change_in_transaction_without_calls_panics", func(t *testing.T) {
+		tester := newChainHooksTester(t, &firehose.Config{}).
+			StartBlockTrx(TestLegacyTrx).
+			StorageChange(CharlieAddr, slot, firehose.EmptyHash, value)
+
+		assert.Panics(t, func() { tester.EndTrx(successReceipt(21000), nil) })
+	})
+}
+
+func TestTracer_SystemCallWithinTransaction(t *testing.T) {
+	newChainHooksTester(t, &firehose.Config{}).
+		StartBlockTrx(TestLegacyTrx).
+		StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
+		Log(BobAddr, [][32]byte{topic("before")}, nil, 0).
+		StartSystemCall().
+		StartCall(AliceAddr, CharlieAddr, bigInt(0), 30000000, nil).
+		StorageChange(CharlieAddr, hash32(1), firehose.EmptyHash, hash32(2)).
+		EndCall(nil, 0).
+		EndSystemCall().
+		Log(BobAddr, [][32]byte{topic("after")}, nil, 1).
+		EndCall(nil, 21000).
+		EndBlockTrx(receiptWithLogs(21000, []firehose.LogData{
+			log1(BobAddr, topic("before"), nil),
+			log1(BobAddr, topic("after"), nil),
+		}), nil, nil).
+		Validate(func(block *pbeth.Block) {
+			require.Len(t, block.SystemCalls, 1)
+			systemCall := block.SystemCalls[0]
+			assert.Equal(t, CharlieAddr[:], systemCall.Address)
+			require.Len(t, systemCall.StorageChanges, 1)
+
+			require.Len(t, block.TransactionTraces, 1)
+			trx := block.TransactionTraces[0]
+			require.Len(t, trx.Calls, 1)
+			rootCall := trx.Calls[0]
+			assert.Equal(t, BobAddr[:], rootCall.Address)
+
+			require.Len(t, rootCall.Logs, 2)
+			assert.Equal(t, uint32(0), rootCall.Logs[0].Index)
+			assert.Equal(t, uint32(1), rootCall.Logs[1].Index)
+
+			// The system call's ordinals sit within the interrupted transaction's
+			assert.Greater(t, systemCall.BeginOrdinal, rootCall.Logs[0].Ordinal)
+			assert.Less(t, systemCall.EndOrdinal, rootCall.Logs[1].Ordinal)
+		})
+}
+
+func TestTracer_DropTransactionsWithoutReceipt(t *testing.T) {
+	newChainHooksTester(t, &firehose.Config{DropTransactionsWithoutReceipt: true}).
+		StartBlockTrx(TestLegacyTrx).
+		StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
+		EndCall(nil, 21000).
+		EndTrx(nil, errors.New("filtered")).
+		StartTrx(TestLegacyTrx).
+		StartCall(AliceAddr, CharlieAddr, bigInt(0), 21000, nil).
+		EndCall(nil, 21000).
+		EndBlockTrx(successReceipt(21000), nil, nil).
+		Validate(func(block *pbeth.Block) {
+			require.Len(t, block.TransactionTraces, 1)
+			assert.Equal(t, CharlieAddr[:], block.TransactionTraces[0].Calls[0].Address)
+		})
+}
+
+func TestTracer_DropTransactionsWithoutReceipt_Parallel(t *testing.T) {
+	coordinator := newChainHooksTester(t, &firehose.Config{DropTransactionsWithoutReceipt: true})
+	coordinator.StartBlock()
+
+	isolated0 := coordinator.Spawn(0)
+	isolated1 := coordinator.Spawn(1)
+
+	isolated0.
+		StartTrx(TestLegacyTrx).
+		StartCall(AliceAddr, BobAddr, bigInt(0), 21000, nil).
+		EndCall(nil, 21000).
+		EndTrx(nil, errors.New("filtered"))
+
+	isolated1.
+		StartTrx(TestLegacyTrx).
+		StartCall(AliceAddr, CharlieAddr, bigInt(0), 21000, nil).
+		EndCall(nil, 21000).
+		EndTrx(successReceipt(21000), nil)
+
+	coordinator.
+		Commit(isolated0).
+		Commit(isolated1).
+		EndBlock(nil).
+		Validate(func(block *pbeth.Block) {
+			require.Len(t, block.TransactionTraces, 1)
+			assert.Equal(t, CharlieAddr[:], block.TransactionTraces[0].Calls[0].Address)
+		})
+}
+
+func TestTracer_BlockEventRulesOverride(t *testing.T) {
+	delegationCode := append([]byte{0xef, 0x01, 0x00}, CharlieAddr[:]...)
+
+	tester := newChainHooksTester(t, &firehose.Config{}).SetMockStateCode(AliceAddr, delegationCode)
+
+	event := TestBlock
+	event.Rules = &firehose.Rules{ChainID: big.NewInt(1), IsPrague: true}
+	tester.tracer.OnBlockStart(event)
+
+	tester.
+		StartTrx(TestLegacyTrx).
+		StartCall(BobAddr, AliceAddr, bigInt(0), 21000, nil).
+		EndCall(nil, 21000).
+		EndTrx(successReceipt(21000), nil).
+		EndBlock(nil).
+		Validate(func(block *pbeth.Block) {
+			assert.Equal(t, CharlieAddr[:], block.TransactionTraces[0].Calls[0].AddressDelegatesTo)
+		})
+}
+
+func TestTracer_BlockAccessListHash(t *testing.T) {
+	balHash := hash32(7)
+	event := TestBlock
+	event.Block.BlockAccessListHash = &balHash
+
+	newChainHooksTester(t, &firehose.Config{}).
+		ValidateWithCustomBlock(event, func(block *pbeth.Block) {
+			assert.Equal(t, balHash[:], block.Header.BlockAccessListHash)
+		})
+}

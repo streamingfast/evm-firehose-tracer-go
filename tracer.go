@@ -72,6 +72,13 @@ type Tracer struct {
 	transactionStateReader StateReader // State reader for current transaction (from TxEvent)
 	inSystemCall           bool
 
+	// KECCAK256 preimages of the current transaction or system call, kept as raw bytes until
+	// it ends, see attachStorageSlotPreimages
+	transactionKeccakPreimages []recordedPreimage
+
+	// Transaction interrupted by a system call started within it, restored when the system call ends
+	interruptedTransaction *interruptedTransactionState
+
 	// Parallel execution / isolated tracer state
 	// These fields support parallel transaction execution:
 	// - transactionIsolated: true = isolated mode, false = coordinator mode
@@ -80,6 +87,7 @@ type Tracer struct {
 	// - coordinator: reference to coordinator tracer (isolated mode only)
 	transactionIsolated  bool                    // true = isolated mode, false = coordinator mode
 	transactionTransient *pbeth.TransactionTrace // Completed transaction awaiting commit (isolated mode only)
+	transactionDropped   bool                    // Transaction ended without a receipt and was dropped, nothing to commit (isolated mode only)
 	commitMutex          sync.Mutex              // Serializes OnTxCommit calls (coordinator mode only)
 	coordinator          *Tracer                 // Reference to coordinator tracer (isolated mode only)
 
@@ -182,6 +190,7 @@ func (t *Tracer) resetBlock() {
 	t.blockReorderOrdinalSnapshot = 0
 	t.blockReorderOrdinalOnce = sync.Once{}
 	t.blockIsGenesis = false
+	t.interruptedTransaction = nil
 	// Set to nil to signal "not currently in a flash block" for the next block.
 	// The pointer itself may have been non-nil during the block just ended;
 	// we clear it here so IsFlashBlock() returns false between blocks.
@@ -199,6 +208,7 @@ func (t *Tracer) resetTransaction() {
 	t.transactionStateReader = nil
 	t.inSystemCall = false
 	t.transactionTransient = nil
+	t.transactionKeccakPreimages = nil
 
 	t.callStack.Reset()
 	t.latestCallEnterSuicided = false
@@ -349,7 +359,11 @@ func (t *Tracer) OnBlockStart(event BlockEvent) {
 	}
 
 	// Compute block rules for this block (block-scoped fork flags)
-	t.blockRules = t.chainConfig.Rules(new(big.Int).SetUint64(block.Number), block.IsMerge, block.Time)
+	if event.Rules != nil {
+		t.blockRules = *event.Rules
+	} else {
+		t.blockRules = t.chainConfig.Rules(new(big.Int).SetUint64(block.Number), block.IsMerge, block.Time)
+	}
 	firehoseInfo("block start (number=%d hash=%x flash_block=%t has_snapshot=%t)", block.Number, block.Hash, t.IsFlashBlock(), t.snapshotForNextFlashBlock != nil)
 
 	// Create protobuf block
@@ -632,6 +646,11 @@ func (t *Tracer) newBlockHeaderFromBlockData(block BlockData) *pbeth.BlockHeader
 		header.RequestsHash = (*block.RequestsHash)[:]
 	}
 
+	// EIP-7928: Amsterdam block access list hash
+	if block.BlockAccessListHash != nil {
+		header.BlockAccessListHash = (*block.BlockAccessListHash)[:]
+	}
+
 	// Polygon-specific: Transaction dependency metadata
 	if block.TxDependency != nil {
 		header.TxDependency = pbeth.NewUint64NestedArray(block.TxDependency)
@@ -866,6 +885,16 @@ func (t *Tracer) OnTxEnd(receipt *ReceiptData, err error) {
 	// Validate state: Must be in block and in transaction
 	t.ensureInBlockAndInTrx()
 
+	if receipt == nil && t.config.DropTransactionsWithoutReceipt {
+		firehoseInfo("trx dropped, it has no receipt (err=%v)", err)
+		if t.transactionIsolated {
+			t.transactionDropped = true
+		} else {
+			t.resetTransaction()
+		}
+		return
+	}
+
 	trxTrace := t.completeTransaction(receipt, err)
 
 	// In isolated mode, store in transient storage for later merge
@@ -998,6 +1027,7 @@ func (t *Tracer) OnTxReset() {
 
 	// Reset transient state
 	t.transactionTransient = nil
+	t.transactionDropped = false
 
 	// Reset call state
 	t.callStack.Reset()
@@ -1017,7 +1047,9 @@ func (t *Tracer) OnTxReset() {
 // with an isolated tracer as the parameter.
 //
 // The method:
-//  1. Validates the isolated tracer has a completed transaction (transactionTransient != nil)
+//  1. Validates the isolated tracer has a completed transaction (transactionTransient != nil),
+//     or returns without appending anything when that transaction was dropped for having no
+//     receipt (Config.DropTransactionsWithoutReceipt)
 //  2. Reorders all ordinals in the transaction relative to coordinator's current ordinal
 //  3. Appends the transaction to the coordinator's block
 //  4. Updates the coordinator's ordinal counter
@@ -1052,6 +1084,13 @@ func (t *Tracer) OnTxCommit(isolatedTracer *Tracer) error {
 	// Validate parameter is isolated tracer
 	if !isolatedTracer.transactionIsolated {
 		return fmt.Errorf("OnTxCommit parameter must be an isolated tracer")
+	}
+
+	if isolatedTracer.transactionDropped {
+		firehoseInfo("isolated transaction was dropped, nothing to commit (coordinator=%s, isolated=%s)",
+			t.tracerID, isolatedTracer.tracerID)
+		isolatedTracer.transactionDropped = false
+		return nil
 	}
 
 	// Validate isolated tracer has completed transaction
@@ -1092,8 +1131,8 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 	firehoseInfo("completing transaction (call_count=%d)", len(t.transaction.Calls))
 
 	if len(t.transaction.Calls) == 0 {
-		if t.deferredCallState.HasLogs() {
-			t.panicInvalidState("transaction emitted a log but has no root call to attach it to", 1)
+		if t.deferredCallState.HasCallOnlyChanges() {
+			t.panicInvalidState("transaction emitted a log or storage change but has no root call to attach it to", 1)
 		}
 
 		// Bad block or misconfigured - terminate immediately
@@ -1122,6 +1161,10 @@ func (t *Tracer) completeTransaction(receipt *ReceiptData, err error) *pbeth.Tra
 			panic(fmt.Sprintf("failed to populate deferred state on tx end: %v", err))
 		}
 	}
+
+	// Must run once every storage change of the transaction is attached to its calls
+	attachStorageSlotPreimages(t.transaction.Calls, t.transactionKeccakPreimages)
+	t.transactionKeccakPreimages = nil
 
 	// Populate receipt data BEFORE populateStateReverted
 	// (matching native tracer order - receipt population before state reverted)
@@ -1625,16 +1668,25 @@ func (t *Tracer) OnStorageChange(addr [20]byte, slot, oldValue, newValue [32]byt
 		return
 	}
 
-	t.ensureInBlockAndInTrxAndInCall()
+	t.ensureInBlockAndInTrx()
 
-	activeCall := t.callStack.Peek()
-	activeCall.StorageChanges = append(activeCall.StorageChanges, &pbeth.StorageChange{
+	change := &pbeth.StorageChange{
 		Address:  addr[:],
 		Key:      slot[:],
 		OldValue: oldValue[:],
 		NewValue: newValue[:],
 		Ordinal:  t.blockOrdinal.Next(),
-	})
+	}
+
+	// A storage change made while no call is active (e.g. Arbitrum's ArbOS writes around
+	// the EVM call) is attached to the transaction's root call.
+	activeCall := t.callStack.Peek()
+	if activeCall == nil {
+		t.deferredCallState.AddStorageChange(change)
+		return
+	}
+
+	activeCall.StorageChanges = append(activeCall.StorageChanges, change)
 }
 
 // ============================================================================
@@ -1680,9 +1732,21 @@ func (t *Tracer) OnLog(addr [20]byte, topics [][32]byte, data []byte, blockIndex
 
 // OnSystemCallStart is called when a system call starts (chain-specific)
 // Matches native tracer behavior in firehose.go:676-682
+//
+// A system call can start while a transaction is being traced (e.g. Arbitrum runs one within
+// its internal transaction), the transaction is then set aside and restored when the system
+// call ends.
 func (t *Tracer) OnSystemCallStart() {
 	firehoseInfo("system call start")
-	t.ensureInBlockAndNotInTrx()
+	t.ensureInBlock(1)
+
+	if t.transaction != nil {
+		if t.inSystemCall {
+			t.panicInvalidState("a system call started while already in a system call", 1)
+		}
+
+		t.interruptTransaction()
+	}
 
 	t.inSystemCall = true
 	t.transaction = &pbeth.TransactionTrace{}
@@ -1695,15 +1759,69 @@ func (t *Tracer) OnSystemCallEnd() {
 	t.ensureInBlockAndInTrx()
 	t.ensureInSystemCall()
 
-	if t.deferredCallState.HasLogs() {
-		t.panicInvalidState("system call emitted a log while no call was active, there is no root call to attach it to", 1)
+	if t.deferredCallState.HasCallOnlyChanges() {
+		t.panicInvalidState("system call emitted a log or storage change while no call was active, there is no root call to attach it to", 1)
 	}
+
+	attachStorageSlotPreimages(t.transaction.Calls, t.transactionKeccakPreimages)
 
 	// Move any calls created during system call to block's system calls list
 	// (matching native tracer line 688)
 	t.block.SystemCalls = append(t.block.SystemCalls, t.transaction.Calls...)
 
 	t.resetTransaction()
+
+	if t.interruptedTransaction != nil {
+		t.resumeTransaction()
+	}
+}
+
+// interruptedTransactionState is the state of a transaction set aside while a system call
+// started within it is traced.
+type interruptedTransactionState struct {
+	transaction                  *pbeth.TransactionTrace
+	transactionLogIndex          uint32
+	transactionStateReader       StateReader
+	transactionKeccakPreimages   []recordedPreimage
+	callStack                    *CallStack
+	deferredCallState            *DeferredCallState
+	latestCallEnterSuicided      bool
+	latestCallEnterSuicidedDepth int
+}
+
+func (t *Tracer) interruptTransaction() {
+	firehoseDebug("interrupting transaction for a system call")
+
+	t.interruptedTransaction = &interruptedTransactionState{
+		transaction:                  t.transaction,
+		transactionLogIndex:          t.transactionLogIndex,
+		transactionStateReader:       t.transactionStateReader,
+		transactionKeccakPreimages:   t.transactionKeccakPreimages,
+		callStack:                    t.callStack,
+		deferredCallState:            t.deferredCallState,
+		latestCallEnterSuicided:      t.latestCallEnterSuicided,
+		latestCallEnterSuicidedDepth: t.latestCallEnterSuicidedDepth,
+	}
+
+	t.callStack = NewCallStack()
+	t.deferredCallState = NewDeferredCallState()
+	t.resetTransaction()
+}
+
+func (t *Tracer) resumeTransaction() {
+	firehoseDebug("resuming transaction interrupted by a system call")
+
+	s := t.interruptedTransaction
+	t.interruptedTransaction = nil
+
+	t.transaction = s.transaction
+	t.transactionLogIndex = s.transactionLogIndex
+	t.transactionStateReader = s.transactionStateReader
+	t.transactionKeccakPreimages = s.transactionKeccakPreimages
+	t.callStack = s.callStack
+	t.deferredCallState = s.deferredCallState
+	t.latestCallEnterSuicided = s.latestCallEnterSuicided
+	t.latestCallEnterSuicidedDepth = s.latestCallEnterSuicidedDepth
 }
 
 // OnOpcode is called for each opcode (optional, for detailed tracing)
@@ -1732,22 +1850,24 @@ func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, rData []byte, de
 // OnKeccakPreimage is called when a keccak256 preimage is available
 // This is typically called during KECCAK256 opcode execution
 // The preimage is the input data that was used to produce the given keccak hash
+//
+// Only preimages that explain a storage slot written by the transaction end up in
+// `Call.KeccakPreimages`, see attachStorageSlotPreimages.
 func (t *Tracer) OnKeccakPreimage(hash [32]byte, preimage []byte) {
 	t.ensureInBlockAndInTrxAndInCall()
 
-	call := t.callStack.Peek()
-	if call == nil {
+	firehoseTrace("keccak preimage (hash=%x preimage_len=%d)", hash, len(preimage))
+
+	if len(preimage) > maxKeccakPreimageSize {
 		return
 	}
 
-	if call.KeccakPreimages == nil {
-		call.KeccakPreimages = make(map[string]string)
-	}
-
-	// Store the preimage as hex-encoded string (empty preimages stored as empty strings)
-	call.KeccakPreimages[hex.EncodeToString(hash[:])] = hex.EncodeToString(preimage)
-
-	firehoseTrace("keccak preimage (hash=%x preimage_len=%d)", hash, len(preimage))
+	// `preimage` points into EVM memory, which later opcodes overwrite, so it's copied
+	t.transactionKeccakPreimages = append(t.transactionKeccakPreimages, recordedPreimage{
+		callIndex: t.callStack.Peek().Index,
+		hash:      hash,
+		preimage:  bytes.Clone(preimage),
+	})
 }
 
 // OnOpcodeFault is called when an opcode execution fails

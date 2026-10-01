@@ -14,6 +14,7 @@ type DeferredCallState struct {
 	balanceChanges   []*pbeth.BalanceChange
 	nonceChanges     []*pbeth.NonceChange
 	codeChanges      []*pbeth.CodeChange
+	storageChanges   []*pbeth.StorageChange
 	logs             []*pbeth.Log
 }
 
@@ -28,12 +29,14 @@ func (d *DeferredCallState) IsEmpty() bool {
 		len(d.balanceChanges) == 0 &&
 		len(d.nonceChanges) == 0 &&
 		len(d.codeChanges) == 0 &&
+		len(d.storageChanges) == 0 &&
 		len(d.logs) == 0
 }
 
-// HasLogs returns true if there are deferred logs
-func (d *DeferredCallState) HasLogs() bool {
-	return len(d.logs) > 0
+// HasCallOnlyChanges returns true if there are deferred logs or storage changes, which
+// exist only inside a call and can't be recorded without one.
+func (d *DeferredCallState) HasCallOnlyChanges() bool {
+	return len(d.logs) > 0 || len(d.storageChanges) > 0
 }
 
 // Reset clears all deferred state
@@ -42,6 +45,7 @@ func (d *DeferredCallState) Reset() {
 	d.balanceChanges = nil
 	d.nonceChanges = nil
 	d.codeChanges = nil
+	d.storageChanges = nil
 	d.logs = nil
 }
 
@@ -63,6 +67,11 @@ func (d *DeferredCallState) AddNonceChange(change *pbeth.NonceChange) {
 // AddCodeChange adds a code change to deferred state
 func (d *DeferredCallState) AddCodeChange(change *pbeth.CodeChange) {
 	d.codeChanges = append(d.codeChanges, change)
+}
+
+// AddStorageChange adds a storage change to deferred state
+func (d *DeferredCallState) AddStorageChange(change *pbeth.StorageChange) {
+	d.storageChanges = append(d.storageChanges, change)
 }
 
 // AddLog adds a log to deferred state
@@ -94,6 +103,7 @@ func (d *DeferredCallState) MaybePopulateCallAndReset(source string, call *pbeth
 		call.BalanceChanges = append(d.balanceChanges, call.BalanceChanges...)
 		call.NonceChanges = append(d.nonceChanges, call.NonceChanges...)
 		call.CodeChanges = append(d.codeChanges, call.CodeChanges...)
+		call.StorageChanges = append(d.storageChanges, call.StorageChanges...)
 		call.Logs = append(d.logs, call.Logs...)
 	} else {
 		// APPEND deferred state (changes that happened AFTER the call)
@@ -102,6 +112,7 @@ func (d *DeferredCallState) MaybePopulateCallAndReset(source string, call *pbeth
 		call.BalanceChanges = append(call.BalanceChanges, d.balanceChanges...)
 		call.NonceChanges = append(call.NonceChanges, d.nonceChanges...)
 		call.CodeChanges = append(call.CodeChanges, d.codeChanges...)
+		call.StorageChanges = append(call.StorageChanges, d.storageChanges...)
 		call.Logs = append(call.Logs, d.logs...)
 	}
 
